@@ -55,6 +55,8 @@ const patterns = [
   "PEELING",
   "MIXING_PATTERN",
   "RAPID_HIGH_RISK",
+  "CIRCULAR_FLOW",
+  "U_TURN_BOUNCE",
 ];
 const names: Record<string, string> = {
   STRUCTURING: "Chia nhỏ giao dịch",
@@ -63,6 +65,8 @@ const names: Record<string, string> = {
   MIXING_PATTERN: "Mẫu mixing",
   RAPID_HIGH_RISK: "Luân chuyển rủi ro",
   DIRECT_BLACKLIST: "Khớp blacklist",
+  CIRCULAR_FLOW: "Chu trình vòng lặp",
+  U_TURN_BOUNCE: "Đảo dòng tiền U-turn",
 };
 const short = (value: string) =>
   value.length > 22 ? value.slice(0, 10) + "…" + value.slice(-6) : value;
