@@ -14,7 +14,7 @@ def generate(config: SimulationConfig, on_progress=None):
         "sim_" + canonical_hash(["address-v1", config.seed, i])[:16] for i in range(config.wallet_count)
     ]
     genesis = {a: (1_000_000 * UNIT if i >= 64 else 0) for i, a in enumerate(addresses)}
-    for i in [0, 2, 16, 52]:
+    for i in [0, 2, 16, 52, 57]:
         genesis[addresses[i]] = 20_000 * UNIT
     for i in range(29, 37):
         genesis[addresses[i]] = 3_001 * UNIT
@@ -54,6 +54,15 @@ def generate(config: SimulationConfig, on_progress=None):
         for i in range(5):
             add(7200 + i * 60, 52 + i, 53 + i, value, "RAPID_HIGH_RISK")
             value -= FEE
+    if "CIRCULAR_FLOW" in config.patterns:
+        val = 15_000 * UNIT
+        add(8400, 57, 58, val, "CIRCULAR_FLOW")
+        val -= FEE
+        add(8460, 58, 59, val, "CIRCULAR_FLOW")
+        val -= FEE
+        add(8520, 59, 60, val, "CIRCULAR_FLOW")
+        val -= FEE
+        add(8580, 60, 57, val, "CIRCULAR_FLOW")
     for _ in range(config.transaction_count - len(intents)):
         a, b = rng.sample(range(64, config.wallet_count), 2)
         add(rng.randint(0, config.simulation_days * 86400), a, b, rng.randint(10, 200) * UNIT)

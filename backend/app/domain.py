@@ -13,7 +13,7 @@ THRESHOLD = 1_000 * UNIT
 FEE = 21_000
 GENESIS = datetime(2026, 9, 8, tzinfo=timezone.utc)
 RULE_VERSION = "rules-v1"
-PATTERNS = ["STRUCTURING", "SMURFING", "PEELING", "MIXING_PATTERN", "RAPID_HIGH_RISK"]
+PATTERNS = ["STRUCTURING", "SMURFING", "PEELING", "MIXING_PATTERN", "RAPID_HIGH_RISK", "CIRCULAR_FLOW"]
 
 
 def freeze_feed(records: list[dict]) -> list[dict]:
@@ -66,7 +66,7 @@ class SimulationConfig(BaseModel):
     simulation_days: int = Field(default=7, ge=1, le=30)
     block_interval_seconds: int = Field(default=12, ge=1, le=60)
     max_transactions_per_block: int = Field(default=100, ge=1, le=100)
-    patterns: list[str] = Field(default_factory=lambda: PATTERNS.copy(), max_length=5)
+    patterns: list[str] = Field(default_factory=lambda: PATTERNS.copy(), max_length=6)
 
     def checked_patterns(self):
         if len(set(self.patterns)) != len(self.patterns) or any(p not in PATTERNS for p in self.patterns):

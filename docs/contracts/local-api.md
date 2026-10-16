@@ -5,6 +5,14 @@ HttpOnly cookie. GET `/session` initializes CSRF; POST `/login` uses that token,
 then response replaces it. Unsafe requests require `X-CSRF-Token`. Server reads
 role from users table, not request body/cookie role. Session expires after 8h.
 
+Browser client shares concurrent GET `/session` initialization and fetches it
+with `cache: no-store`. Before each login it reads the current cookie's token;
+if that login receives exactly HTTP 403 `Invalid CSRF token`, it synchronizes
+once more and retries login once. Wrong credentials, other 403 responses and
+data mutations are never automatically retried. No CSRF token is persisted in
+localStorage. Backend CSRF comparison, cookie flags, origin checks and RBAC remain
+required; the client flow does not bypass them.
+
 Money is canonical integer base-10 **string**, max 78 digits, units SIM/10^6.
 Time UTC ISO 8601, `global_index` is zero-based ledger order, corresponding to
 block_height/tx_index. `as_of_index` bounds ledger/assessment availability.

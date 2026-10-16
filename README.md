@@ -4,6 +4,11 @@ Khung local chạy thực với **FastAPI + PostgreSQL + worker + React/Cytoscap
 theo [kế hoạch](Ke-hoach-AML-Blockchain.md). Account-based, một tài sản giả lập
 SIM (6 decimals), baseline B2: rule-based + temporal graph + haircut allocation.
 
+![Giao diện AML Observatory](docs/assets/ui-dashboard-desktop.png)
+
+Giao diện dùng nền trung tính, điều hướng ngang và phân cấp chữ lấy cảm hứng từ
+[Apple](https://www.apple.com/). [Kiểm chứng UI và ảnh các màn hình](docs/reports/ui-validation.md).
+
 ## Chạy local
 
 Cần Docker Desktop đang chạy Linux containers và Node.js 24. Không cần cài

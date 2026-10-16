@@ -94,7 +94,7 @@ def test_T03_inclusive_window_and_expiration():
     assert "STRUCTURING" not in codes(e.process(tx(e, addr(1), addr(2), UNIT, 8, 1801)))
 
 
-@pytest.mark.parametrize("pattern", ["SMURFING", "PEELING", "MIXING_PATTERN", "RAPID_HIGH_RISK"])
+@pytest.mark.parametrize("pattern", ["SMURFING", "PEELING", "MIXING_PATTERN", "RAPID_HIGH_RISK", "CIRCULAR_FLOW"])
 def test_T04_T05_T07_T11_synthetic_patterns(pattern):
     dataset = generate(SimulationConfig(wallet_count=80, transaction_count=150, patterns=[pattern]))
     engine = Engine(dataset["genesis"], dataset["feed"])
@@ -117,6 +117,51 @@ def test_T04_T05_T07_T11_synthetic_patterns(pattern):
             o["outflow_base"]
         ) + int(o["fee_base"])
         assert int(o["balance_start_base"]) == 0
+    if pattern == "CIRCULAR_FLOW":
+        h = next(h for h in matched[-1][1]["hits"] if h["code"] == pattern)
+        assert h["observed"]["hops"] == 4
+        assert h["observed"]["retention_ratio"] >= 0.7
+
+
+def test_circular_flow_unit_and_boundaries():
+    genesis = {addr(1): 20000 * UNIT}
+    # 1. Valid 4-hop cycle: 1 -> 2 -> 3 -> 4 -> 1
+    e = Engine(genesis, [])
+    t1 = tx(e, addr(1), addr(2), 1000 * UNIT, 0, 0)
+    e.process(t1)
+    t2 = tx(e, addr(2), addr(3), 1000 * UNIT - FEE, 1, 60)
+    e.process(t2)
+    t3 = tx(e, addr(3), addr(4), 1000 * UNIT - 2 * FEE, 2, 120)
+    e.process(t3)
+    t4 = tx(e, addr(4), addr(1), 1000 * UNIT - 3 * FEE, 3, 180)
+    res = e.process(t4)
+    assert "CIRCULAR_FLOW" in codes(res)
+    hit = next(h for h in res["hits"] if h["code"] == "CIRCULAR_FLOW")
+    assert hit["anchor"] == addr(1)
+    assert hit["observed"]["hops"] == 4
+    assert res["score"] >= 70
+
+    # 2. Open path (not returning to origin: 1 -> 2 -> 3 -> 4 -> 5): no CIRCULAR_FLOW
+    e2 = Engine(genesis, [])
+    e2.process(tx(e2, addr(1), addr(2), 1000 * UNIT, 0, 0))
+    e2.process(tx(e2, addr(2), addr(3), 1000 * UNIT - FEE, 1, 60))
+    e2.process(tx(e2, addr(3), addr(4), 1000 * UNIT - 2 * FEE, 2, 120))
+    res2 = e2.process(tx(e2, addr(4), addr(5), 1000 * UNIT - 3 * FEE, 3, 180))
+    assert "CIRCULAR_FLOW" not in codes(res2)
+
+    # 3. Window expired (> 3600s: 1 -> 2 -> 3 -> 1 at 3700s): no CIRCULAR_FLOW
+    e3 = Engine(genesis, [])
+    e3.process(tx(e3, addr(1), addr(2), 1000 * UNIT, 0, 0))
+    e3.process(tx(e3, addr(2), addr(3), 1000 * UNIT - FEE, 1, 60))
+    res3 = e3.process(tx(e3, addr(3), addr(1), 1000 * UNIT - 2 * FEE, 2, 3700))
+    assert "CIRCULAR_FLOW" not in codes(res3)
+
+    # 4. Low retention ratio (< 70%: 1 -> 2 -> 3 -> 1 returning only 500 of 1000 UNIT): no CIRCULAR_FLOW
+    e4 = Engine(genesis, [])
+    e4.process(tx(e4, addr(1), addr(2), 1000 * UNIT, 0, 0))
+    e4.process(tx(e4, addr(2), addr(3), 600 * UNIT, 1, 60))
+    res4 = e4.process(tx(e4, addr(3), addr(1), 500 * UNIT, 2, 120))
+    assert "CIRCULAR_FLOW" not in codes(res4)
 
 
 def test_T06_peeling_needs_four_levels():

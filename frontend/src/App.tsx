@@ -7,17 +7,13 @@ import {
   useState,
 } from "react";
 import {
-  Activity,
   ArrowDownLeft,
   ArrowRight,
   ArrowUpRight,
-  Boxes,
-  CheckCircle2,
   ChevronRight,
   Database,
   Download,
   Filter,
-  GitBranch,
   Layers3,
   LogOut,
   Network,
@@ -25,8 +21,6 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
-  ShieldAlert,
-  SlidersHorizontal,
   X,
 } from "lucide-react";
 import { api, query } from "./api";
@@ -61,6 +55,7 @@ const patterns = [
   "PEELING",
   "MIXING_PATTERN",
   "RAPID_HIGH_RISK",
+  "CIRCULAR_FLOW",
 ];
 const names: Record<string, string> = {
   STRUCTURING: "Chia nhỏ giao dịch",
@@ -69,6 +64,7 @@ const names: Record<string, string> = {
   MIXING_PATTERN: "Mẫu mixing",
   RAPID_HIGH_RISK: "Luân chuyển rủi ro",
   DIRECT_BLACKLIST: "Khớp blacklist",
+  CIRCULAR_FLOW: "Chu trình vòng lặp",
 };
 const short = (value: string) =>
   value.length > 22 ? value.slice(0, 10) + "…" + value.slice(-6) : value;
@@ -378,9 +374,9 @@ export function App() {
       <div className="login-shell">
         <div className="login-story">
           <div className="wordmark">
-            <ShieldCheck /> AML / OBSERVATORY
+            <ShieldCheck size={25} /> AML Observatory
           </div>
-          <span className="eyebrow">BLOCKCHAIN SIMULATION LAB</span>
+          <span className="eyebrow">Phòng mô phỏng blockchain</span>
           <h1>
             Đọc dòng tiền.
             <br />
@@ -390,10 +386,6 @@ export function App() {
             Mô phỏng giao dịch blockchain và khám phá bằng chứng của các mẫu
             hành vi AML.
           </p>
-          <div className="login-nodes">
-            <Network size={120} />
-            <span>Rule-based + Temporal graph</span>
-          </div>
           <small>Dữ liệu tổng hợp · Tài sản SIM · Baseline B2</small>
         </div>
         <form
@@ -410,7 +402,7 @@ export function App() {
             });
           }}
         >
-          <span className="eyebrow">LOCAL WORKSPACE</span>
+          <span className="eyebrow">Workspace của bạn</span>
           <h2>Đăng nhập phòng mô phỏng</h2>
           <p>
             Tài khoản local: admin, analyst hoặc viewer.
@@ -454,51 +446,49 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <a className="skip-link" href="#workspace">
+        Đến nội dung chính
+      </a>
+      <header className="app-header">
         <div className="brand">
           <div className="brand-icon">
-            <ShieldCheck size={26} />
+            <ShieldCheck size={23} />
           </div>
-          <div>
-            AML Observatory<span>BLOCKCHAIN LAB</span>
-          </div>
+          <div>AML Observatory</div>
         </div>
-        <div className="workspace-chip">
-          <span className="live-dot" />
-          Local workspace<code>B2</code>
-        </div>
-        <span className="nav-label">PHÂN TÍCH</span>
-        <nav>
+        <nav aria-label="Điều hướng chính">
           {[
-            { id: "simulation", label: "Điều khiển mô phỏng", icon: Boxes },
-            { id: "graph", label: "Khám phá dòng tiền", icon: Network },
-            { id: "alerts", label: "Cảnh báo & đánh giá", icon: ShieldAlert },
+            {
+              id: "simulation",
+              label: "Điều khiển mô phỏng",
+              shortLabel: "Mô phỏng",
+            },
+            {
+              id: "graph",
+              label: "Khám phá dòng tiền",
+              shortLabel: "Dòng tiền",
+            },
+            {
+              id: "alerts",
+              label: "Cảnh báo & đánh giá",
+              shortLabel: "Cảnh báo",
+            },
           ].map((n) => (
             <button
               key={n.id}
               className={tab === n.id ? "active" : ""}
+              aria-label={n.label}
+              aria-current={tab === n.id ? "page" : undefined}
               onClick={() => setTab(n.id as typeof tab)}
             >
-              <n.icon size={19} />
-              {n.label}
+              {n.shortLabel}
               {n.id === "alerts" && countAlerts > 0 && (
                 <span className="nav-count">{countAlerts}</span>
               )}
             </button>
           ))}
         </nav>
-        <div className="sidebar-note">
-          <GitBranch size={20} />
-          <b>Giải thích bằng bằng chứng</b>
-          <p>
-            Thứ tự thời gian, nguồn rủi ro và lượng tiền phân bổ trên từng đường
-            đi.
-          </p>
-        </div>
-        <div className="sidebar-bottom">
-          <div className="avatar">
-            {user.username.slice(0, 1).toUpperCase()}
-          </div>
+        <div className="account-menu">
           <div>
             <b>{user.username}</b>
             <span>{user.role}</span>
@@ -517,19 +507,12 @@ export function App() {
             <LogOut size={17} />
           </button>
         </div>
-      </aside>
-      <main>
+      </header>
+      <main id="workspace" tabIndex={-1}>
         <header className="topbar">
-          <div>
-            <span>WORKSPACE</span>
-            <ChevronRight size={14} />
-            <b>
-              {tab === "simulation"
-                ? "Mô phỏng"
-                : tab === "graph"
-                  ? "Dòng tiền"
-                  : "Cảnh báo & đánh giá"}
-            </b>
+          <div className="workspace-context">
+            <span>Local workspace</span>
+            <span>SIM · Baseline B2</span>
           </div>
           <div className="topbar-right">
             <span className="connection">
@@ -572,7 +555,6 @@ export function App() {
         <div className="page">
           <div className="page-heading">
             <div>
-              <span className="eyebrow">AML / SIMULATED NETWORK</span>
               <h1>
                 {tab === "simulation"
                   ? "Điều khiển mô phỏng"
@@ -589,7 +571,7 @@ export function App() {
               </p>
             </div>
             <div className="run-picker">
-              <label htmlFor="run-picker">LẦN MÔ PHỎNG</label>
+              <label htmlFor="run-picker">Lần mô phỏng</label>
               <select
                 id="run-picker"
                 value={selected ?? ""}
@@ -622,7 +604,6 @@ export function App() {
             <div className="metric-card">
               <div>
                 <span>Giao dịch trong sổ cái</span>
-                <Layers3 size={18} />
               </div>
               <strong>{numeric(run?.transaction_count)}</strong>
               <small>
@@ -634,7 +615,6 @@ export function App() {
             <div className="metric-card">
               <div>
                 <span>Cảnh báo AML</span>
-                <ShieldAlert size={18} />
               </div>
               <strong>
                 {metrics?.status === "pending" ? "—" : numeric(countAlerts)}
@@ -649,7 +629,6 @@ export function App() {
             <div className="metric-card">
               <div>
                 <span>Tiến độ phân tích</span>
-                <Activity size={18} />
               </div>
               <strong>{run ? progress + "%" : "—"}</strong>
               <small>
@@ -666,7 +645,6 @@ export function App() {
             <div className="metric-card">
               <div>
                 <span>Chiến dịch được phát hiện</span>
-                <CheckCircle2 size={18} />
               </div>
               <strong>
                 {metrics?.campaign_count != null
@@ -682,10 +660,7 @@ export function App() {
               <section className="panel simulation-panel">
                 <div className="panel-heading">
                   <div>
-                    <h2>
-                      <SlidersHorizontal size={19} />
-                      Cấu hình lần chạy
-                    </h2>
+                    <h2>Cấu hình lần chạy</h2>
                     <p>Cùng seed và cấu hình tạo cùng nội dung sổ cái.</p>
                   </div>
                   <span className="subtle-tag">ACCOUNT-BASED · SIM</span>
@@ -754,7 +729,7 @@ export function App() {
                     ))}
                   </div>
                   <div className="scenario-row">
-                    <span>KỊCH BẢN</span>
+                    <span>Kịch bản</span>
                     {patterns.map((p) => (
                       <label className="scenario-check" key={p}>
                         <input
@@ -845,9 +820,6 @@ export function App() {
                         key={code}
                         onClick={() => setTab("alerts")}
                       >
-                        <span className="signal-icon">
-                          <GitBranch size={17} />
-                        </span>
                         <div>
                           <b>{names[code] ?? code}</b>
                           <small>{code}</small>
@@ -954,7 +926,7 @@ export function App() {
                     )}
                   </div>
                   <aside className="inspector">
-                    <span className="eyebrow">BẰNG CHỨNG & THÔNG TIN</span>
+                    <span className="eyebrow">Bằng chứng & thông tin</span>
                     {wallet ? (
                       <>
                         <h3>Ví được chọn</h3>
@@ -1000,7 +972,7 @@ export function App() {
                 </div>
                 <div className="timeline">
                   <Layers3 size={18} />
-                  <label htmlFor="timeline">AS-OF ORDER</label>
+                  <label htmlFor="timeline">As-of order</label>
                   <input
                     id="timeline"
                     type="range"
@@ -1411,10 +1383,15 @@ export function App() {
       </main>
       {feedOpen && (
         <div className="modal-backdrop">
-          <section className="modal panel">
+          <section
+            className="modal panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="feed-title"
+          >
             <div className="panel-heading">
               <div>
-                <h2>Thêm phiên bản threat intelligence</h2>
+                <h2 id="feed-title">Thêm phiên bản threat intelligence</h2>
                 <p>Địa chỉ tổng hợp. Không thực thi expression hoặc tải URL.</p>
               </div>
               <button

@@ -5,7 +5,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import networkx as nx
-from app.domain import THRESHOLD, Ledger, Tx, canonical_hash, score
+from app.domain import THRESHOLD, UNIT, Ledger, Tx, canonical_hash, score
 
 
 @dataclass(frozen=True)
@@ -204,6 +204,7 @@ class Engine:
             hits.extend(self.smurfing(tx, partial_reasons))
             hits.extend(self.peeling(tx))
             hits.extend(self.mixing(tx, partial_reasons))
+            hits.extend(self.circular_flow(tx, moved))
         direct = [(s, direction) for s in sender_sources for direction in ["sender"]] + [
             (s, "recipient") for s in recipient_sources
         ]
@@ -301,7 +302,7 @@ class Engine:
         result = score(
             {
                 "E": min(1, max(exposure, direct_component)),
-                "P": float(any(c in {"STRUCTURING", "SMURFING", "PEELING", "MIXING_PATTERN"} for c in codes)),
+                "P": float(any(c in {"STRUCTURING", "SMURFING", "PEELING", "MIXING_PATTERN", "CIRCULAR_FLOW"} for c in codes)),
                 "V": min(1, max(len(out5), len(in5)) / 20),
                 "Q": min(1, max(volume_out, volume_in) / (3 * THRESHOLD)),
                 "A": 0.0,
@@ -577,3 +578,55 @@ class Engine:
                 },
             )
         ]
+
+    def circular_flow(self, tx: Tx, moved: list[Part]) -> list[dict]:
+        candidates = {}
+        for p in moved:
+            if len(p.path) < 3:
+                continue
+            for start_idx in range(len(p.path) - 2):
+                cycle = p.path[start_idx:]
+                if cycle[0].sender == tx.recipient and 3 <= len(cycle) <= 5:
+                    intermediates = [t.recipient for t in cycle[:-1]]
+                    if len(set(intermediates)) != len(intermediates):
+                        continue
+                    if tx.recipient in intermediates:
+                        continue
+                    if (tx.timestamp - cycle[0].timestamp).total_seconds() > 3600:
+                        continue
+                    if cycle[0].value < 100 * UNIT:
+                        continue
+                    key = (cycle[0].sender, tuple(t.tx_hash for t in cycle))
+                    if key not in candidates:
+                        candidates[key] = [cycle, p.amount]
+                    else:
+                        candidates[key][1] += p.amount
+                    break
+        hits = []
+        for (anchor, hashes), (cycle, total_returned) in candidates.items():
+            if total_returned * 10 < cycle[0].value * 7:
+                continue
+            hits.append(
+                self.hit(
+                    "CIRCULAR_FLOW",
+                    anchor,
+                    list(cycle),
+                    {
+                        "anchor": anchor,
+                        "hops": len(cycle),
+                        "initial_value_base": str(cycle[0].value),
+                        "returned_value_base": str(total_returned),
+                        "retention_ratio": min(1.0, total_returned / cycle[0].value),
+                        "duration_seconds": (tx.timestamp - cycle[0].timestamp).total_seconds(),
+                        "path_tx_hashes": list(hashes),
+                    },
+                    {
+                        "hops_min": 3,
+                        "hops_max": 5,
+                        "retention_ratio_min": 0.7,
+                        "window_seconds": 3600,
+                        "min_value_base": str(100 * UNIT),
+                    },
+                )
+            )
+        return hits

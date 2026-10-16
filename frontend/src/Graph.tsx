@@ -35,8 +35,10 @@ export function Graph({ data, onNode, onEdge }: GraphProps) {
           style: {
             "background-color": "data(color)",
             label: "data(label)",
-            "font-size": 9,
-            color: "#526575",
+            "font-size": 11,
+            "font-family":
+              '-apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif',
+            color: "#515154",
             "text-valign": "bottom",
             "text-margin-y": 7,
             width: 24,
@@ -53,8 +55,8 @@ export function Graph({ data, onNode, onEdge }: GraphProps) {
           selector: "edge",
           style: {
             width: 1.2,
-            "line-color": "#c5d7db",
-            "target-arrow-color": "#b4cbd0",
+            "line-color": "#c7c7cc",
+            "target-arrow-color": "#a1a1a6",
             "target-arrow-shape": "triangle",
             "curve-style": "bezier",
             "arrow-scale": 0.7,
@@ -63,11 +65,11 @@ export function Graph({ data, onNode, onEdge }: GraphProps) {
         {
           selector: ":selected",
           style: {
-            "background-color": "#136c70",
-            "line-color": "#136c70",
-            "target-arrow-color": "#136c70",
+            "background-color": "#0071e3",
+            "line-color": "#0071e3",
+            "target-arrow-color": "#0071e3",
             "border-width": 4,
-            "border-color": "#f0b663",
+            "border-color": "#004a95",
           },
         },
       ],
