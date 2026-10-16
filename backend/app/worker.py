@@ -413,7 +413,7 @@ def analyze(job_id: str):
                             continue
                         components = {**old.payload["components"]}
                         codes = [x["code"] for x in old.payload["hits"]] + [hit["code"]]
-                        if hit["code"] in {"STRUCTURING", "SMURFING", "PEELING", "MIXING_PATTERN", "CIRCULAR_FLOW", "U_TURN_BOUNCE"}:
+                        if hit["code"] in {"STRUCTURING", "SMURFING", "PEELING", "MIXING_PATTERN", "CIRCULAR_FLOW", "U_TURN_BOUNCE", "TAINT_PAGERANK"}:
                             components["P"] = 1.0
                         revision = {
                             **old.payload,

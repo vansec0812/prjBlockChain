@@ -13,9 +13,10 @@ def generate(config: SimulationConfig, on_progress=None):
     addresses = [
         "sim_" + canonical_hash(["address-v1", config.seed, i])[:16] for i in range(config.wallet_count)
     ]
-    genesis = {a: (1_000_000 * UNIT if i >= 64 else 0) for i, a in enumerate(addresses)}
-    for i in [0, 2, 16, 52, 57, 61]:
+    genesis = {a: (1_000_000 * UNIT if i >= 68 else 0) for i, a in enumerate(addresses)}
+    for i in [0, 2, 16, 57, 61]:
         genesis[addresses[i]] = 20_000 * UNIT
+    genesis[addresses[52]] = 40_000 * UNIT
     for i in range(29, 37):
         genesis[addresses[i]] = 3_001 * UNIT
     intents = []
@@ -67,8 +68,17 @@ def generate(config: SimulationConfig, on_progress=None):
         val = 12_000 * UNIT
         add(9000, 61, 62, val, "U_TURN_BOUNCE")
         add(9060, 62, 61, val - FEE, "U_TURN_BOUNCE")
+    if "TAINT_PAGERANK" in config.patterns:
+        t_base = 9600
+        val_pr = 10_000 * UNIT
+        add(t_base, 52, 63, val_pr, "TAINT_PAGERANK")
+        v64 = 7_000 * UNIT
+        v65 = val_pr - v64 - 2 * FEE
+        add(t_base + 60, 63, 64, v64, "TAINT_PAGERANK")
+        add(t_base + 72, 63, 65, v65, "TAINT_PAGERANK")
+        add(t_base + 130, 64, 66, v64 - FEE, "TAINT_PAGERANK")
     for _ in range(config.transaction_count - len(intents)):
-        a, b = rng.sample(range(64, config.wallet_count), 2)
+        a, b = rng.sample(range(68, config.wallet_count), 2)
         add(rng.randint(0, config.simulation_days * 86400), a, b, rng.randint(10, 200) * UNIT)
     intents.sort(key=lambda x: (x[0], x[1]))
     ledger = Ledger(genesis)
@@ -147,7 +157,7 @@ def generate(config: SimulationConfig, on_progress=None):
             labels[label].append(tx_hash)
     flush()
     feed = []
-    if "RAPID_HIGH_RISK" in config.patterns:
+    if "RAPID_HIGH_RISK" in config.patterns or "TAINT_PAGERANK" in config.patterns:
         feed.append(
             {
                 "network_id": "sim-account-1",

@@ -38,6 +38,26 @@ def apportion(parts: list[Part], amount: int) -> tuple[list[Part], list[Part]]:
     return sent, kept
 
 
+def compute_pagerank(
+    graph: nx.Graph,
+    alpha: float = 0.85,
+    personalization: dict | None = None,
+    weight: str = "weight",
+    max_iter: int = 100,
+) -> dict:
+    """Personalized PageRank supporting pure-Python environments without scipy/numpy."""
+    try:
+        from networkx.algorithms.link_analysis.pagerank_alg import _pagerank_python
+
+        return _pagerank_python(
+            graph, alpha=alpha, personalization=personalization, weight=weight, max_iter=max_iter
+        )
+    except Exception:
+        return nx.pagerank(
+            graph, alpha=alpha, personalization=personalization, weight=weight, max_iter=max_iter
+        )
+
+
 class Engine:
     def __init__(
         self,
@@ -199,6 +219,7 @@ class Engine:
         partial_reasons = set()
         if any(p.truncated for p in moved):
             partial_reasons.add("provenance_path_compacted")
+        exposure_pr = 0.0
         if tx.sender != tx.recipient:
             hits.extend(self.structuring(tx))
             hits.extend(self.smurfing(tx, partial_reasons))
@@ -206,6 +227,8 @@ class Engine:
             hits.extend(self.mixing(tx, partial_reasons))
             hits.extend(self.circular_flow(tx, moved))
             hits.extend(self.u_turn(tx))
+            exposure_pr, taint_hits = self.taint_pagerank(tx, moved)
+            hits.extend(taint_hits)
         direct = [(s, direction) for s in sender_sources for direction in ["sender"]] + [
             (s, "recipient") for s in recipient_sources
         ]
@@ -302,8 +325,8 @@ class Engine:
         direct_component = max((s["severity"] / 100 * s["confidence"] for s, _ in direct), default=0)
         result = score(
             {
-                "E": min(1, max(exposure, direct_component)),
-                "P": float(any(c in {"STRUCTURING", "SMURFING", "PEELING", "MIXING_PATTERN", "CIRCULAR_FLOW", "U_TURN_BOUNCE"} for c in codes)),
+                "E": min(1, max(exposure, direct_component, exposure_pr)),
+                "P": float(any(c in {"STRUCTURING", "SMURFING", "PEELING", "MIXING_PATTERN", "CIRCULAR_FLOW", "U_TURN_BOUNCE", "TAINT_PAGERANK"} for c in codes)),
                 "V": min(1, max(len(out5), len(in5)) / 20),
                 "Q": min(1, max(volume_out, volume_in) / (3 * THRESHOLD)),
                 "A": 0.0,
@@ -673,3 +696,102 @@ class Engine:
                 )
                 break
         return hits
+
+    def taint_pagerank(self, tx: Tx, moved: list[Part]) -> tuple[float, list[dict]]:
+        seeds = {}
+        cutoff = tx.timestamp if self.mode == "as-known" else self.as_of_time
+        for (net_id, addr_val), sources in self.feed_index.items():
+            if net_id != "sim-account-1":
+                continue
+            n = self.node(addr_val)
+            if not self.graph.has_node(n):
+                continue
+            for s in sources:
+                if (
+                    s.get("enabled", True)
+                    and s["category"] == "blacklist"
+                    and datetime.fromisoformat(s["known_at"]) <= cutoff
+                    and datetime.fromisoformat(s["valid_from"]) <= tx.timestamp
+                    and (
+                        s.get("valid_to") is None
+                        or tx.timestamp < datetime.fromisoformat(s["valid_to"])
+                    )
+                ):
+                    w = (s["severity"] / 100.0) * s["confidence"]
+                    if n not in seeds or w > seeds[n]:
+                        seeds[n] = w
+
+        if not seeds:
+            return 0.0, []
+
+        tainted_nodes = set(seeds.keys())
+        for s in seeds:
+            tainted_nodes.update(nx.descendants(self.graph, s))
+
+        recipient_node = self.node(tx.recipient)
+        if recipient_node not in tainted_nodes:
+            return 0.0, []
+
+        sender_node = self.node(tx.sender)
+        if sender_node in seeds:
+            taint_ratio = 1.0
+        else:
+            tainted_amount = sum(p.amount for p in moved if p.source is not None)
+            taint_ratio = (tainted_amount / tx.value) if tx.value > 0 else 0.0
+
+        if taint_ratio <= 0.0 and recipient_node not in seeds:
+            return 0.0, []
+
+        subG = self.graph.subgraph(tainted_nodes)
+        p_vector = {s: seeds[s] for s in seeds if s in subG}
+        pr = compute_pagerank(subG, alpha=0.85, personalization=p_vector, weight="value_base", max_iter=100)
+
+        max_seed_pr = max((pr.get(s, 0.0) for s in seeds if s in pr), default=1.0)
+        raw_pr = pr.get(recipient_node, 0.0)
+
+        if recipient_node in seeds:
+            exposure_pr = 1.0
+        else:
+            base_exposure = (raw_pr / max_seed_pr) if max_seed_pr > 0 else 0.0
+            exposure_pr = min(1.0, max(0.0, base_exposure * taint_ratio))
+
+        hits = []
+        if recipient_node not in seeds and exposure_pr >= 0.05:
+            evidence_txs = [tx]
+            for s in seeds:
+                if nx.has_path(subG, s, recipient_node):
+                    try:
+                        path = nx.shortest_path(subG, s, recipient_node)
+                        for u, v in zip(path, path[1:]):
+                            for k, edge_data in subG.get_edge_data(u, v).items():
+                                if "tx" in edge_data:
+                                    evidence_txs.append(edge_data["tx"])
+                    except Exception:
+                        pass
+            evidence_txs = sorted({t.tx_hash: t for t in evidence_txs}.values(), key=lambda t: t.order)
+            if len(evidence_txs) > self.path_budget:
+                evidence_txs = evidence_txs[: self.path_budget]
+
+            hits.append(
+                self.hit(
+                    "TAINT_PAGERANK",
+                    tx.recipient,
+                    evidence_txs,
+                    {
+                        "recipient": tx.recipient,
+                        "exposure_score": round(exposure_pr, 4),
+                        "raw_pagerank": raw_pr,
+                        "seed_nodes": [s[1] for s in seeds],
+                        "max_seed_pagerank": max_seed_pr,
+                        "inflow_base": str(tx.value),
+                        "taint_ratio": round(taint_ratio, 4),
+                    },
+                    {
+                        "exposure_min": 0.05,
+                        "alpha": 0.85,
+                        "weight_field": "value_base",
+                    },
+                )
+            )
+
+        return exposure_pr, hits
