@@ -205,6 +205,7 @@ class Engine:
             hits.extend(self.peeling(tx))
             hits.extend(self.mixing(tx, partial_reasons))
             hits.extend(self.circular_flow(tx, moved))
+            hits.extend(self.u_turn(tx))
         direct = [(s, direction) for s in sender_sources for direction in ["sender"]] + [
             (s, "recipient") for s in recipient_sources
         ]
@@ -302,7 +303,7 @@ class Engine:
         result = score(
             {
                 "E": min(1, max(exposure, direct_component)),
-                "P": float(any(c in {"STRUCTURING", "SMURFING", "PEELING", "MIXING_PATTERN", "CIRCULAR_FLOW"} for c in codes)),
+                "P": float(any(c in {"STRUCTURING", "SMURFING", "PEELING", "MIXING_PATTERN", "CIRCULAR_FLOW", "U_TURN_BOUNCE"} for c in codes)),
                 "V": min(1, max(len(out5), len(in5)) / 20),
                 "Q": min(1, max(volume_out, volume_in) / (3 * THRESHOLD)),
                 "A": 0.0,
@@ -629,4 +630,46 @@ class Engine:
                     },
                 )
             )
+        return hits
+
+    def u_turn(self, tx: Tx) -> list[dict]:
+        entries = self.window(tx.sender, tx, 300, incoming=True)
+        hits = []
+        for in_tx, _ in entries:
+            if in_tx.sender == tx.recipient and in_tx.sender != in_tx.recipient:
+                dwell = (tx.timestamp - in_tx.timestamp).total_seconds()
+                if not 0 < dwell <= 300:
+                    continue
+                if in_tx.value < 100 * UNIT:
+                    continue
+                if tx.value * 10 < in_tx.value * 9:
+                    continue
+                mule_balance = self.ledger.balances.get(tx.sender, 0)
+                if mule_balance * 100 > in_tx.value * 5:
+                    continue
+                evidence = sorted([in_tx, tx], key=lambda t: t.order)
+                anchor = f"{tx.recipient}:{tx.sender}"
+                hits.append(
+                    self.hit(
+                        "U_TURN_BOUNCE",
+                        anchor,
+                        evidence,
+                        {
+                            "sender_a": tx.recipient,
+                            "mule_b": tx.sender,
+                            "inflow_base": str(in_tx.value),
+                            "outflow_base": str(tx.value),
+                            "bounce_ratio": min(1.0, tx.value / in_tx.value),
+                            "dwell_seconds": dwell,
+                            "mule_remaining_base": str(mule_balance),
+                        },
+                        {
+                            "min_value_base": str(100 * UNIT),
+                            "max_dwell_seconds": 300,
+                            "min_bounce_ratio": 0.90,
+                            "max_mule_remaining_ratio": 0.05,
+                        },
+                    )
+                )
+                break
         return hits

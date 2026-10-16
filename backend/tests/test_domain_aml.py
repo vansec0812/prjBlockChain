@@ -94,7 +94,7 @@ def test_T03_inclusive_window_and_expiration():
     assert "STRUCTURING" not in codes(e.process(tx(e, addr(1), addr(2), UNIT, 8, 1801)))
 
 
-@pytest.mark.parametrize("pattern", ["SMURFING", "PEELING", "MIXING_PATTERN", "RAPID_HIGH_RISK", "CIRCULAR_FLOW"])
+@pytest.mark.parametrize("pattern", ["SMURFING", "PEELING", "MIXING_PATTERN", "RAPID_HIGH_RISK", "CIRCULAR_FLOW", "U_TURN_BOUNCE"])
 def test_T04_T05_T07_T11_synthetic_patterns(pattern):
     dataset = generate(SimulationConfig(wallet_count=80, transaction_count=150, patterns=[pattern]))
     engine = Engine(dataset["genesis"], dataset["feed"])
@@ -121,6 +121,10 @@ def test_T04_T05_T07_T11_synthetic_patterns(pattern):
         h = next(h for h in matched[-1][1]["hits"] if h["code"] == pattern)
         assert h["observed"]["hops"] == 4
         assert h["observed"]["retention_ratio"] >= 0.7
+    if pattern == "U_TURN_BOUNCE":
+        h = next(h for h in matched[-1][1]["hits"] if h["code"] == pattern)
+        assert h["observed"]["bounce_ratio"] >= 0.9
+        assert h["observed"]["dwell_seconds"] <= 300
 
 
 def test_circular_flow_unit_and_boundaries():
@@ -162,6 +166,47 @@ def test_circular_flow_unit_and_boundaries():
     e4.process(tx(e4, addr(2), addr(3), 600 * UNIT, 1, 60))
     res4 = e4.process(tx(e4, addr(3), addr(1), 500 * UNIT, 2, 120))
     assert "CIRCULAR_FLOW" not in codes(res4)
+
+
+def test_u_turn_bounce_unit_and_boundaries():
+    genesis = {addr(1): 20000 * UNIT}
+    # 1. Valid U-Turn: 1 -> 2 (1000 SIM), then 2 -> 1 (950 SIM) after 60s
+    e = Engine(genesis, [])
+    t1 = tx(e, addr(1), addr(2), 1000 * UNIT, 0, 0)
+    e.process(t1)
+    t2 = tx(e, addr(2), addr(1), 950 * UNIT, 1, 60)
+    res = e.process(t2)
+    assert "U_TURN_BOUNCE" in codes(res)
+    hit = next(h for h in res["hits"] if h["code"] == "U_TURN_BOUNCE")
+    assert hit["anchor"] == f"{addr(1)}:{addr(2)}"
+    assert hit["observed"]["dwell_seconds"] == 60
+    assert hit["observed"]["bounce_ratio"] == 0.95
+    assert res["score"] >= 70
+
+    # 2. Dwell expired (> 300s): 1 -> 2 at 0s, 2 -> 1 at 350s: no U_TURN_BOUNCE
+    e2 = Engine(genesis, [])
+    e2.process(tx(e2, addr(1), addr(2), 1000 * UNIT, 0, 0))
+    res2 = e2.process(tx(e2, addr(2), addr(1), 950 * UNIT, 1, 350))
+    assert "U_TURN_BOUNCE" not in codes(res2)
+
+    # 3. Low bounce ratio (< 90%): 1 -> 2 (1000 SIM), 2 -> 1 (800 SIM): no U_TURN_BOUNCE
+    e3 = Engine(genesis, [])
+    e3.process(tx(e3, addr(1), addr(2), 1000 * UNIT, 0, 0))
+    res3 = e3.process(tx(e3, addr(2), addr(1), 800 * UNIT, 1, 60))
+    assert "U_TURN_BOUNCE" not in codes(res3)
+
+    # 4. Mule not drained (remaining > 5%): 2 had 2000 SIM initial, after sending still has 1050 SIM: no U_TURN_BOUNCE
+    genesis4 = {addr(1): 20000 * UNIT, addr(2): 2000 * UNIT}
+    e4 = Engine(genesis4, [])
+    e4.process(tx(e4, addr(1), addr(2), 1000 * UNIT, 0, 0))
+    res4 = e4.process(tx(e4, addr(2), addr(1), 950 * UNIT, 1, 60))
+    assert "U_TURN_BOUNCE" not in codes(res4)
+
+    # 5. Different recipient: 1 -> 2, 2 -> 3 (not U-turn back to 1): no U_TURN_BOUNCE
+    e5 = Engine(genesis, [])
+    e5.process(tx(e5, addr(1), addr(2), 1000 * UNIT, 0, 0))
+    res5 = e5.process(tx(e5, addr(2), addr(3), 950 * UNIT, 1, 60))
+    assert "U_TURN_BOUNCE" not in codes(res5)
 
 
 def test_T06_peeling_needs_four_levels():
