@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from app import worker
 from app.aml import Engine
 from app.db import get_db, make_engine
-from app.domain import SimulationConfig
+from app.domain import RULE_VERSION, SimulationConfig
 from app.main import app
 from app.models import Assessment, Base, Checkpoint, Job, Outbox, Run, Transaction, User, Wallet
 
@@ -229,6 +229,62 @@ def test_truth_privilege_and_run_fk_isolation(database):
         with pytest.raises(IntegrityError):
             db.add(Outbox(run_id=run2, tx_hash="not-in-this-run", analysis_version="test", global_index=0))
             db.commit()
+
+
+def test_pagerank_only_run_freezes_seed_before_worker_starts(database):
+    factory, _ = database
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/simulations",
+            json=SimulationConfig(
+                seed=142, wallet_count=80, transaction_count=150, patterns=["TAINT_PAGERANK"]
+            ).model_dump(),
+            headers=login(client),
+        )
+        assert created.status_code == 202, created.text
+        ids = created.json()
+        assert ids["analysis_version"].startswith(f"b2-{RULE_VERSION}:")
+        with factory() as db:
+            job = db.get(Job, ids["job_id"])
+            assert job.config["rule_version"] == RULE_VERSION
+            assert len(job.config["feed"]) == 1
+            frozen = job.config["feed"]
+        worker.handle(ids["job_id"])
+        with factory() as db:
+            assert db.get(Job, ids["job_id"]).config["feed"] == frozen
+            assert db.get(Run, ids["run_id"]).status == "completed"
+        metrics = client.get("/api/metrics", params={"run_id": ids["run_id"]}).json()
+        assert metrics["rule_version"] == RULE_VERSION
+        assert metrics["campaign_count"] == metrics["campaigns_detected"] == 1
+        alerts = client.get("/api/alerts", params={"run_id": ids["run_id"]}).json()["items"]
+        assert "TAINT_PAGERANK" in {a["detector_code"] for a in alerts}
+
+
+@pytest.mark.parametrize("legacy_version", [None, "rules-v1"])
+@pytest.mark.parametrize("kind", ["generate", "replay"])
+def test_legacy_job_cannot_resume_with_changed_rules(database, legacy_version, kind):
+    factory, _ = database
+    with TestClient(app) as client:
+        headers = login(client)
+        ids = client.post(
+            "/api/simulations",
+            json=SimulationConfig(wallet_count=80, transaction_count=150).model_dump(),
+            headers=headers,
+        ).json()
+        with factory.begin() as db:
+            job = db.get(Job, ids["job_id"])
+            job.config = {**job.config, "rule_version": legacy_version}
+            job.kind = kind
+        worker.handle(ids["job_id"])
+        with factory() as db:
+            assert db.get(Job, ids["job_id"]).status == "failed"
+            assert "Rule version" in db.get(Job, ids["job_id"]).error
+            assert db.scalar(select(func.count()).select_from(Transaction)) == 0
+            assert db.scalar(select(func.count()).select_from(Assessment)) == 0
+            assert db.get(Run, ids["run_id"]).genesis == {}
+        response = client.post(f"/api/simulations/{ids['run_id']}/retry", headers=headers)
+        assert response.status_code == 409
+        assert "Rule version" in response.json()["message"]
 
 
 def test_episode_quiet_time_crosses_clock_bucket():

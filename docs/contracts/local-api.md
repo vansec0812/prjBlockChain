@@ -53,3 +53,10 @@ Config bounds: seed 0..2^31−1, wallets 80..10.000, tx 150..100.000, simulated 
 config uses JSON numbers; money does not. Invalid/negative amounts/nonces/fees
 are rejected before ledger append. The current API generates data through jobs,
 not arbitrary raw intent upload or real crypto transfer.
+
+From rules-v2, new jobs freeze `config.rule_version` with their feed snapshot.
+Retry returns 409 if the job uses a different/missing rule version. The worker
+also refuses those jobs before modifying ledger or assessments. Completed legacy
+runs can replay into a new rules-v2 analysis without changing ledger balances.
+Historical assessments retain their original version. No schema migration is
+required. See [ADR-0002](../decisions/0002-reviewed-motifs-rules-v2.md).

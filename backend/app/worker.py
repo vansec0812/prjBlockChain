@@ -14,7 +14,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import sessionmaker
 from app.aml import Engine
 from app.db import Session, engine, make_engine
-from app.domain import SimulationConfig, Tx, canonical_hash, score
+from app.domain import RULE_VERSION, SimulationConfig, Tx, canonical_hash, score
 from app.evaluation import evaluate
 from app.generator import generate
 from app.models import (
@@ -79,9 +79,19 @@ def same_episode(payload: dict, hit: dict, tx: Tx, quiet_seconds: int = 1800) ->
     return payload["anchor"] == hit["anchor"]
 
 
+class RuleVersionError(ValueError):
+    """A checkpoint may only resume under its original engine/generator artifact."""
+
+
+def require_job_version(job):
+    if job.config.get("rule_version") != RULE_VERSION:
+        raise RuleVersionError("Rule version đã thay đổi; tạo run mới hoặc replay ledger đã hoàn thành.")
+
+
 def generate_ledger(job_id: str):
     with Session() as db:
         job = db.get(Job, job_id)
+        require_job_version(job)
         run = db.get(Run, job.run_id)
         config = SimulationConfig(**run.config)
         run_id, version = run.id, job.analysis_version
@@ -253,6 +263,7 @@ def generate_ledger(job_id: str):
 def analyze(job_id: str):
     with Session() as db:
         job = db.get(Job, job_id)
+        require_job_version(job)
         run = db.get(Run, job.run_id)
         run_id, version, config = run.id, job.analysis_version, job.config
         genesis = {a: int(v) for a, v in run.genesis.items()}
@@ -413,7 +424,15 @@ def analyze(job_id: str):
                             continue
                         components = {**old.payload["components"]}
                         codes = [x["code"] for x in old.payload["hits"]] + [hit["code"]]
-                        if hit["code"] in {"STRUCTURING", "SMURFING", "PEELING", "MIXING_PATTERN", "CIRCULAR_FLOW", "U_TURN_BOUNCE", "TAINT_PAGERANK"}:
+                        if hit["code"] in {
+                            "STRUCTURING",
+                            "SMURFING",
+                            "PEELING",
+                            "MIXING_PATTERN",
+                            "CIRCULAR_FLOW",
+                            "U_TURN_BOUNCE",
+                            "TAINT_PAGERANK",
+                        }:
                             components["P"] = 1.0
                         revision = {
                             **old.payload,
@@ -505,7 +524,7 @@ def analyze(job_id: str):
                 "baseline": "B2",
                 "model_status": "not_configured",
                 "seed": run.seed,
-                "rule_version": "rules-v1",
+                "rule_version": RULE_VERSION,
                 "feed_versions": sorted({f["list_version"] for f in config["feed"]}),
                 "ledger_hash": db.scalar(
                     select(Block.block_hash)
@@ -551,7 +570,12 @@ def handle(job_id: str):
         log.exception("job_failed run=%s job=%s type=%s", run_id, job_id, type(exc).__name__)
         with Session.begin() as db:
             job = db.get(Job, job_id)
-            job.status, job.error = "failed", f"{type(exc).__name__}: xử lý thất bại; xem worker logs."
+            job.status = "failed"
+            job.error = (
+                str(exc)
+                if isinstance(exc, RuleVersionError)
+                else f"{type(exc).__name__}: xử lý thất bại; xem worker logs."
+            )
             run = db.get(Run, run_id)
             run.status, run.error = "failed", job.error
             db.add(Event(run_id=run_id, kind="job", payload={"job_id": job_id, "status": "failed"}))
