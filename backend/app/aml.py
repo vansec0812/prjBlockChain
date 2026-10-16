@@ -5,7 +5,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import networkx as nx
-from app.domain import THRESHOLD, UNIT, Ledger, Tx, canonical_hash, score
+from app.domain import RULE_VERSION, THRESHOLD, UNIT, Ledger, Tx, canonical_hash, score
 
 
 @dataclass(frozen=True)
@@ -18,6 +18,7 @@ class Part:
     truncated: bool = False
     received_amount: int = 0
     forward_ratios: tuple[tuple[int, int], ...] = ()
+    transfer_path: tuple[Tx, ...] = ()
 
 
 def apportion(parts: list[Part], amount: int) -> tuple[list[Part], list[Part]]:
@@ -45,17 +46,34 @@ def compute_pagerank(
     weight: str = "weight",
     max_iter: int = 100,
 ) -> dict:
-    """Personalized PageRank supporting pure-Python environments without scipy/numpy."""
-    try:
-        from networkx.algorithms.link_analysis.pagerank_alg import _pagerank_python
-
-        return _pagerank_python(
-            graph, alpha=alpha, personalization=personalization, weight=weight, max_iter=max_iter
-        )
-    except Exception:
-        return nx.pagerank(
-            graph, alpha=alpha, personalization=personalization, weight=weight, max_iter=max_iter
-        )
+    """Bounded power iteration; keep monetary edge sums integer until normalization."""
+    if not graph:
+        return {}
+    if not graph.is_directed():
+        graph = graph.to_directed()
+    nodes = list(graph)
+    outgoing = {node: defaultdict(int) for node in nodes}
+    for start, end, data in graph.edges(data=True):
+        outgoing[start][end] += data.get(weight, 1)
+    totals = {node: sum(edges.values()) for node, edges in outgoing.items()}
+    personal = {node: (personalization or {}).get(node, 0) for node in nodes}
+    if personalization is None:
+        personal = dict.fromkeys(nodes, 1)
+    total = sum(personal.values())
+    if total <= 0:
+        raise ValueError("PageRank requires positive personalization")
+    personal = {node: value / total for node, value in personal.items()}
+    ranks = dict.fromkeys(nodes, 1 / len(nodes))
+    for _ in range(max_iter):
+        dangling = sum(ranks[node] for node in nodes if not totals[node])
+        updated = {node: (1 - alpha + alpha * dangling) * personal[node] for node in nodes}
+        for start, edges in outgoing.items():
+            for end, value in edges.items():
+                updated[end] += alpha * ranks[start] * (value / totals[start])
+        if sum(abs(updated[node] - ranks[node]) for node in nodes) < len(nodes) * 1e-6:
+            return updated
+        ranks = updated
+    raise nx.PowerIterationFailedConvergence(max_iter)
 
 
 class Engine:
@@ -127,7 +145,7 @@ class Engine:
         for p in parts:
             key = (p.source["address"], p.source["list_version"]) if p.source else ("normal", "")
             if key not in grouped:
-                grouped[key] = replace(p, origin="", path=(), truncated=True)
+                grouped[key] = replace(p, origin="", path=(), transfer_path=(), truncated=True)
             else:
                 grouped[key] = replace(grouped[key], amount=grouped[key].amount + p.amount)
         self.parts[address] = list(grouped.values())
@@ -175,6 +193,7 @@ class Engine:
                     truncated=p.truncated or len(path) > 5,
                     received_amount=p.amount,
                     forward_ratios=ratios[-4:],
+                    transfer_path=(p.transfer_path + (tx,))[-5:],
                 )
             )
         if tx.sender == tx.recipient:
@@ -219,15 +238,14 @@ class Engine:
         partial_reasons = set()
         if any(p.truncated for p in moved):
             partial_reasons.add("provenance_path_compacted")
-        exposure_pr = 0.0
         if tx.sender != tx.recipient:
             hits.extend(self.structuring(tx))
             hits.extend(self.smurfing(tx, partial_reasons))
             hits.extend(self.peeling(tx))
             hits.extend(self.mixing(tx, partial_reasons))
             hits.extend(self.circular_flow(tx, moved))
-            hits.extend(self.u_turn(tx))
-            exposure_pr, taint_hits = self.taint_pagerank(tx, moved)
+            hits.extend(self.u_turn(tx, moved))
+            _, taint_hits = self.taint_pagerank(tx, moved, partial_reasons)
             hits.extend(taint_hits)
         direct = [(s, direction) for s in sender_sources for direction in ["sender"]] + [
             (s, "recipient") for s in recipient_sources
@@ -325,8 +343,22 @@ class Engine:
         direct_component = max((s["severity"] / 100 * s["confidence"] for s, _ in direct), default=0)
         result = score(
             {
-                "E": min(1, max(exposure, direct_component, exposure_pr)),
-                "P": float(any(c in {"STRUCTURING", "SMURFING", "PEELING", "MIXING_PATTERN", "CIRCULAR_FLOW", "U_TURN_BOUNCE", "TAINT_PAGERANK"} for c in codes)),
+                "E": min(1, max(exposure, direct_component)),
+                "P": float(
+                    any(
+                        c
+                        in {
+                            "STRUCTURING",
+                            "SMURFING",
+                            "PEELING",
+                            "MIXING_PATTERN",
+                            "CIRCULAR_FLOW",
+                            "U_TURN_BOUNCE",
+                            "TAINT_PAGERANK",
+                        }
+                        for c in codes
+                    )
+                ),
                 "V": min(1, max(len(out5), len(in5)) / 20),
                 "Q": min(1, max(volume_out, volume_in) / (3 * THRESHOLD)),
                 "A": 0.0,
@@ -356,7 +388,7 @@ class Engine:
             "evidence": list(dict.fromkeys(t.tx_hash for t in evidence)),
             "observed": observed,
             "thresholds": thresholds,
-            "rule_version": "rules-v1",
+            "rule_version": RULE_VERSION,
         }
 
     def structuring(self, tx):
@@ -606,10 +638,10 @@ class Engine:
     def circular_flow(self, tx: Tx, moved: list[Part]) -> list[dict]:
         candidates = {}
         for p in moved:
-            if len(p.path) < 3:
+            if len(p.transfer_path) < 3:
                 continue
-            for start_idx in range(len(p.path) - 2):
-                cycle = p.path[start_idx:]
+            for start_idx in range(len(p.transfer_path) - 2):
+                cycle = p.transfer_path[start_idx:]
                 if cycle[0].sender == tx.recipient and 3 <= len(cycle) <= 5:
                     intermediates = [t.recipient for t in cycle[:-1]]
                     if len(set(intermediates)) != len(intermediates):
@@ -655,17 +687,22 @@ class Engine:
             )
         return hits
 
-    def u_turn(self, tx: Tx) -> list[dict]:
+    def u_turn(self, tx: Tx, moved: list[Part]) -> list[dict]:
         entries = self.window(tx.sender, tx, 300, incoming=True)
         hits = []
         for in_tx, _ in entries:
             if in_tx.sender == tx.recipient and in_tx.sender != in_tx.recipient:
                 dwell = (tx.timestamp - in_tx.timestamp).total_seconds()
-                if not 0 < dwell <= 300:
+                if not 0 <= dwell <= 300:
                     continue
                 if in_tx.value < 100 * UNIT:
                     continue
-                if tx.value * 10 < in_tx.value * 9:
+                returned = sum(
+                    part.amount
+                    for part in moved
+                    if len(part.transfer_path) >= 2 and part.transfer_path[-2].tx_hash == in_tx.tx_hash
+                )
+                if returned * 10 < in_tx.value * 9:
                     continue
                 mule_balance = self.ledger.balances.get(tx.sender, 0)
                 if mule_balance * 100 > in_tx.value * 5:
@@ -682,7 +719,8 @@ class Engine:
                             "mule_b": tx.sender,
                             "inflow_base": str(in_tx.value),
                             "outflow_base": str(tx.value),
-                            "bounce_ratio": min(1.0, tx.value / in_tx.value),
+                            "allocated_return_base": str(returned),
+                            "bounce_ratio": min(1.0, returned / in_tx.value),
                             "dwell_seconds": dwell,
                             "mule_remaining_base": str(mule_balance),
                         },
@@ -697,7 +735,8 @@ class Engine:
                 break
         return hits
 
-    def taint_pagerank(self, tx: Tx, moved: list[Part]) -> tuple[float, list[dict]]:
+    def taint_pagerank(self, tx: Tx, moved: list[Part], partial_reasons=None) -> tuple[float, list[dict]]:
+        partial_reasons = partial_reasons if partial_reasons is not None else set()
         seeds = {}
         cutoff = tx.timestamp if self.mode == "as-known" else self.as_of_time
         for (net_id, addr_val), sources in self.feed_index.items():
@@ -712,65 +751,74 @@ class Engine:
                     and s["category"] == "blacklist"
                     and datetime.fromisoformat(s["known_at"]) <= cutoff
                     and datetime.fromisoformat(s["valid_from"]) <= tx.timestamp
-                    and (
-                        s.get("valid_to") is None
-                        or tx.timestamp < datetime.fromisoformat(s["valid_to"])
-                    )
+                    and (s.get("valid_to") is None or tx.timestamp < datetime.fromisoformat(s["valid_to"]))
                 ):
                     w = (s["severity"] / 100.0) * s["confidence"]
-                    if n not in seeds or w > seeds[n]:
+                    if w > 0 and (n not in seeds or w > seeds[n]):
                         seeds[n] = w
 
         if not seeds:
             return 0.0, []
 
-        tainted_nodes = set(seeds.keys())
-        for s in seeds:
-            tainted_nodes.update(nx.descendants(self.graph, s))
-
         recipient_node = self.node(tx.recipient)
-        if recipient_node not in tainted_nodes:
+        if recipient_node in seeds:
             return 0.0, []
-
-        sender_node = self.node(tx.sender)
-        if sender_node in seeds:
-            taint_ratio = 1.0
-        else:
-            tainted_amount = sum(p.amount for p in moved if p.source is not None)
-            taint_ratio = (tainted_amount / tx.value) if tx.value > 0 else 0.0
-
-        if taint_ratio <= 0.0 and recipient_node not in seeds:
+        causal = [
+            part
+            for part in moved
+            if part.source is not None
+            and part.source["category"] == "blacklist"
+            and self.node(part.source["address"]) in seeds
+            and not part.truncated
+            and part.path
+            and part.started is not None
+            and (tx.timestamp - part.started).total_seconds() <= 86400
+        ]
+        if len(causal) > self.path_budget:
+            partial_reasons.add("evidence_path_budget")
+            causal = sorted(causal, key=lambda part: (-part.amount, tuple(t.tx_hash for t in part.path)))[
+                : self.path_budget
+            ]
+        if not causal:
             return 0.0, []
-
-        subG = self.graph.subgraph(tainted_nodes)
+        # Ranking uses bounded historical topology. Amount/evidence comes only
+        # from time-ordered haircut paths, never from static shortest paths.
+        subG = nx.MultiDiGraph()
+        pending, visited, inspected = deque(sorted(seeds)), set(seeds), 0
+        while pending:
+            node = pending.popleft()
+            subG.add_node(node)
+            for start, end, key, data in self.graph.out_edges(node, keys=True, data=True):
+                if inspected >= self.edge_budget:
+                    partial_reasons.add("graph_budget")
+                    return 0.0, []
+                inspected += 1
+                subG.add_edge(start, end, key=key, **data)
+                if end not in visited:
+                    visited.add(end)
+                    pending.append(end)
+        if recipient_node not in subG:
+            return 0.0, []
         p_vector = {s: seeds[s] for s in seeds if s in subG}
-        pr = compute_pagerank(subG, alpha=0.85, personalization=p_vector, weight="value_base", max_iter=100)
+        try:
+            pr = compute_pagerank(
+                subG, alpha=0.85, personalization=p_vector, weight="value_base", max_iter=100
+            )
+        except nx.PowerIterationFailedConvergence:
+            partial_reasons.add("pagerank_unavailable")
+            return 0.0, []
 
         max_seed_pr = max((pr.get(s, 0.0) for s in seeds if s in pr), default=1.0)
         raw_pr = pr.get(recipient_node, 0.0)
 
-        if recipient_node in seeds:
-            exposure_pr = 1.0
-        else:
-            base_exposure = (raw_pr / max_seed_pr) if max_seed_pr > 0 else 0.0
-            exposure_pr = min(1.0, max(0.0, base_exposure * taint_ratio))
+        taint_ratio = sum(part.amount for part in causal) / tx.value
+        base_exposure = (raw_pr / max_seed_pr) if max_seed_pr > 0 else 0.0
+        exposure_pr = min(1.0, max(0.0, base_exposure * taint_ratio))
 
         hits = []
         if recipient_node not in seeds and exposure_pr >= 0.05:
-            evidence_txs = [tx]
-            for s in seeds:
-                if nx.has_path(subG, s, recipient_node):
-                    try:
-                        path = nx.shortest_path(subG, s, recipient_node)
-                        for u, v in zip(path, path[1:]):
-                            for k, edge_data in subG.get_edge_data(u, v).items():
-                                if "tx" in edge_data:
-                                    evidence_txs.append(edge_data["tx"])
-                    except Exception:
-                        pass
+            evidence_txs = [step for part in causal for step in part.path]
             evidence_txs = sorted({t.tx_hash: t for t in evidence_txs}.values(), key=lambda t: t.order)
-            if len(evidence_txs) > self.path_budget:
-                evidence_txs = evidence_txs[: self.path_budget]
 
             hits.append(
                 self.hit(
@@ -781,15 +829,25 @@ class Engine:
                         "recipient": tx.recipient,
                         "exposure_score": round(exposure_pr, 4),
                         "raw_pagerank": raw_pr,
-                        "seed_nodes": [s[1] for s in seeds],
+                        "seed_nodes": sorted({part.source["address"] for part in causal}),
                         "max_seed_pagerank": max_seed_pr,
                         "inflow_base": str(tx.value),
                         "taint_ratio": round(taint_ratio, 4),
+                        "allocated_base": str(sum(part.amount for part in causal)),
+                        "paths": [
+                            {
+                                "tx_hashes": [step.tx_hash for step in part.path],
+                                "allocated_base": str(part.amount),
+                                "source": part.source,
+                            }
+                            for part in causal
+                        ],
                     },
                     {
                         "exposure_min": 0.05,
                         "alpha": 0.85,
                         "weight_field": "value_base",
+                        "evidence_basis": "temporal haircut allocation; PageRank is contextual ranking",
                     },
                 )
             )

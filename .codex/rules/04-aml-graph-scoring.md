@@ -181,3 +181,11 @@ blend/floors/final/severity, detected_at, as_of_order/time, analysis_mode/versio
 rule/model/feed versions, coverage/truncated và nguyên nhân thiếu dữ liệu.
 Evidence tham chiếu ledger cùng run, không dùng đoạn text suy đoán thay tx IDs.
 Rule version mới tạo assessment mới; review của analyst giữ ở lịch sử riêng.
+
+## Phần mở rộng đã được merge và review
+
+Circular Flow, U-Turn và PageRank là mở rộng tập motif theo
+[ADR-0002](../../docs/decisions/0002-reviewed-motifs-rules-v2.md), dùng rules-v2.
+Giữ công thức E/blend và các floor đã khóa. PageRank chỉ cung cấp ngữ cảnh;
+evidence lượng tiền phải từ haircut theo thời gian, có budget và coverage.
+Không diễn giải các detector bổ sung là đã có trong kế hoạch gốc.

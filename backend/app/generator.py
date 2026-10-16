@@ -4,7 +4,17 @@ import random
 from collections import defaultdict
 from dataclasses import replace
 from datetime import timedelta
-from app.domain import FEE, GENESIS, UNIT, Ledger, SimulationConfig, Tx, canonical_hash, merkle
+from app.domain import (
+    FEE,
+    GENESIS,
+    UNIT,
+    Ledger,
+    SimulationConfig,
+    Tx,
+    canonical_hash,
+    merkle,
+    synthetic_feed,
+)
 
 
 def generate(config: SimulationConfig, on_progress=None):
@@ -156,24 +166,7 @@ def generate(config: SimulationConfig, on_progress=None):
         if label:
             labels[label].append(tx_hash)
     flush()
-    feed = []
-    if "RAPID_HIGH_RISK" in config.patterns or "TAINT_PAGERANK" in config.patterns:
-        feed.append(
-            {
-                "network_id": "sim-account-1",
-                "address": addresses[52],
-                "category": "blacklist",
-                "severity": 95,
-                "confidence": 1.0,
-                "source_name": "Synthetic TI",
-                "source_ref": "synthetic://ti-v1",
-                "known_at": GENESIS.isoformat(),
-                "valid_from": GENESIS.isoformat(),
-                "valid_to": None,
-                "list_version": f"synthetic-v1-{config.seed}",
-                "enabled": True,
-            }
-        )
+    feed = synthetic_feed(config.seed, bool({"RAPID_HIGH_RISK", "TAINT_PAGERANK"} & set(config.patterns)))
     return {
         "genesis": genesis,
         "blocks": blocks,

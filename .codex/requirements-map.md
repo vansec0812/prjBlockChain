@@ -82,3 +82,12 @@ Bàn giao khi triển khai xong: source+lockfiles; Compose; migrations+contracts
 config/seeds+generator; versioned rulebook+score; fixtures+test report;
 raw measured metrics; demo dashboard; kiến trúc/phương pháp/kết quả/giới hạn.
 Các sản phẩm này phải là artifact thật, không chỉ danh sách TODO hoặc hình mockup.
+
+## Mở rộng sau các PR #1–#4
+
+Ba motif Circular Flow/U-Turn/PageRank được ghi nhận tại
+[ADR-0002](../docs/decisions/0002-reviewed-motifs-rules-v2.md), không thay thế các
+yêu cầu T01–T22. Counterexamples độc lập tại
+`backend/tests/test_pr_regressions.py`; snapshot TI và tương thích phiên bản
+được kiểm qua PostgreSQL/API/worker trong `test_postgres_api_worker.py`.
+Kết quả thực và giới hạn nằm ở [báo cáo review](../docs/reports/pr-review-2026-10-17.md).

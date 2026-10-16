@@ -12,7 +12,7 @@ UNIT = 1_000_000
 THRESHOLD = 1_000 * UNIT
 FEE = 21_000
 GENESIS = datetime(2026, 9, 8, tzinfo=timezone.utc)
-RULE_VERSION = "rules-v1"
+RULE_VERSION = "rules-v2"
 PATTERNS = [
     "STRUCTURING",
     "SMURFING",

@@ -51,7 +51,9 @@ không sử dụng hoặc thay đổi MySQL có sẵn trên máy.
    snapshot mới; replay hồi cứu khác as-known và giữ kết quả cũ.
 
 Các rule: STRUCTURING, SMURFING, PEELING, MIXING_PATTERN, RAPID_HIGH_RISK,
-DIRECT_BLACKLIST. Score floors 70/80/95; làm tròn half-up, baseline A=0.
+DIRECT_BLACKLIST, CIRCULAR_FLOW, U_TURN_BOUNCE, TAINT_PAGERANK. Phiên bản mới
+`rules-v2` theo [ADR-0002](docs/decisions/0002-reviewed-motifs-rules-v2.md).
+Score floors 70/80/95; làm tròn half-up, baseline A=0.
 Score thể hiện **ưu tiên xem xét**, không phải xác suất hoặc kết luận pháp lý.
 
 ## Kiểm tra và thao tác
@@ -61,6 +63,7 @@ docker compose ps
 docker compose logs --tail 100 api worker
 docker compose --profile test run --rm test
 node scripts/smoke.mjs --count=5000 --restart-worker
+node scripts/smoke.mjs --count=5000 --all-patterns --restart-worker
 ```
 
 Test integration chỉ reset database **`aml_test`**; không reset `aml`.
@@ -131,6 +134,9 @@ từ genesis/ledger rồi tiếp tục. Rejected intents không tạo cạnh AML
 Baseline B2 hoạt động local. Provenance giữ tối đa 5 hop và compact khi một ví
 vượt 128 phần vốn; số dư vẫn bảo toàn, các phần mất đường giải thích được partial.
 Candidate mixing là heuristic vùng trung gian, không xác nhận một dịch vụ mixer.
+PageRank là ngữ cảnh topology; evidence lượng tiền dựa trên haircut theo thời
+gian, không dùng rank thay component E. Job cũ khác rule version không retry
+bằng engine mới; giữ dữ liệu cũ và replay run completed sang version mới.
 Payroll/custody giống hình thái có thể cảnh báo; không dùng truth để bỏ qua.
 
 Metrics demo là **single-run synthetic evaluation**, tách online/retrospective.
