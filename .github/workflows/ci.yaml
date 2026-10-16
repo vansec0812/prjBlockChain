@@ -23,9 +23,11 @@ jobs:
       - name: Start isolated stack
         run: node scripts/local.mjs up
       - name: Backend and PostgreSQL integration
-        run: docker compose --profile test run --rm test
+        run: |
+          docker compose --profile test run --rm test ruff check --no-cache app tests
+          docker compose --profile test run --rm test
       - name: End-to-end API smoke
-        run: node scripts/smoke.mjs --count=150
+        run: node scripts/smoke.mjs --count=150 --all-patterns
       - name: Browser workflow
         working-directory: frontend
         run: npx playwright install --with-deps chromium && npm run test:e2e

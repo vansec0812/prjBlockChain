@@ -17,7 +17,7 @@ from sqlalchemy import and_, func, or_, select, text
 from starlette.middleware.sessions import SessionMiddleware
 from app.aml import Engine
 from app.db import Session, get_db
-from app.domain import SimulationConfig, Tx, canonical_hash, freeze_feed, synthetic_feed
+from app.domain import RULE_VERSION, SimulationConfig, Tx, canonical_hash, freeze_feed, synthetic_feed
 from app.models import (
     Alert,
     AlertSnapshot,
@@ -316,10 +316,12 @@ def create_simulation(
         raise HTTPException(429, "Tối đa 5 công việc trong hàng đợi local.")
     run_id = str(uuid4())
     snapshot = freeze_feed(
-        synthetic_feed(body.seed, "RAPID_HIGH_RISK" in body.patterns)
+        synthetic_feed(body.seed, bool({"RAPID_HIGH_RISK", "TAINT_PAGERANK"} & set(body.patterns)))
         + [f.payload for f in db.scalars(select(Feed))]
     )
-    version = "b2-rules-v1:" + canonical_hash([config, snapshot, "as-known", "baseline-A0"])[:12] + ":a1"
+    version = (
+        f"b2-{RULE_VERSION}:" + canonical_hash([config, snapshot, "as-known", "baseline-A0"])[:12] + ":a1"
+    )
     db.add(Run(id=run_id, seed=body.seed, config=config, active_version=version, feed_snapshot=snapshot))
     db.flush()
     job = Job(
@@ -328,7 +330,7 @@ def create_simulation(
         analysis_version=version,
         idempotency_key=user.username + ":" + idempotency_key,
         request_hash=digest,
-        config={"feed": snapshot, "mode": "as-known"},
+        config={"feed": snapshot, "mode": "as-known", "rule_version": RULE_VERSION},
     )
     db.add(job)
     db.add(Audit(username=user.username, action="simulation.create", target=run_id, payload=config))
@@ -372,14 +374,19 @@ def replay(
         raise HTTPException(409, "Replay yêu cầu ledger đã hoàn thành.")
     count = db.scalar(select(func.count()).select_from(Job).where(Job.run_id == run_id))
     feed = freeze_feed([f.payload for f in db.scalars(select(Feed))])
-    version = "b2-rules-v1:" + canonical_hash([feed, body.mode])[:12] + f":a{count + 1}"
+    version = f"b2-{RULE_VERSION}:" + canonical_hash([feed, body.mode])[:12] + f":a{count + 1}"
     job = Job(
         run_id=run_id,
         kind="replay",
         analysis_version=version,
         idempotency_key=user.username + ":" + idempotency_key,
         request_hash=digest,
-        config={"feed": feed, "mode": body.mode, "as_of_time": now().isoformat()},
+        config={
+            "feed": feed,
+            "mode": body.mode,
+            "as_of_time": now().isoformat(),
+            "rule_version": RULE_VERSION,
+        },
     )
     db.add(job)
     run.active_version, run.status, run.analyzed_count = version, "queued", 0
@@ -410,6 +417,8 @@ def retry(run_id: str, user=Depends(admin), db=Depends(get_db)):
     )
     if run.status != "failed" or job is None:
         raise HTTPException(409, "Không có công việc thất bại để thử lại.")
+    if job.config.get("rule_version") != RULE_VERSION:
+        raise HTTPException(409, "Rule version đã thay đổi; tạo run mới hoặc replay ledger đã hoàn thành.")
     job.status, job.error, run.status, run.error = "queued", None, "queued", None
     db.add(Audit(username=user.username, action="job.retry", target=job.id, payload={}))
     db.commit()

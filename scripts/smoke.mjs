@@ -6,12 +6,14 @@ const env=Object.fromEntries(readFileSync(new URL('../.env',import.meta.url),'ut
 const base=process.env.AML_URL??`http://localhost:${env.WEB_PORT??8080}`;
 const count=Number(process.argv.find(a=>a.startsWith('--count='))?.split('=')[1]??5000);
 const restart=process.argv.includes('--restart-worker');
+const allPatterns=process.argv.includes('--all-patterns');
 function client(){let cookie='',csrf='';return {async call(path,method='GET',body,extra={}){const response=await fetch(base+'/api'+path,{method,headers:{Cookie:cookie,'Content-Type':'application/json','X-CSRF-Token':csrf,...extra},body:body===undefined?undefined:JSON.stringify(body)});const set=response.headers.getSetCookie();if(set.length)cookie=set.at(-1).split(';')[0];const data=await response.json();if(data.csrf_token)csrf=data.csrf_token;return {status:response.status,data};},async login(name){assert.equal((await this.call('/session')).status,200);assert.equal((await this.call('/login','POST',{username:name,password:env[name.toUpperCase()+'_PASSWORD']})).status,200);},async stream(runId){const controller=new AbortController();const response=await fetch(base+'/api/events?run_id='+runId,{headers:{Cookie:cookie,'Last-Event-ID':'1'},signal:controller.signal});assert.equal(response.status,200);assert.ok(response.headers.get('content-type').includes('text/event-stream'));const reader=response.body.getReader();await reader.read();controller.abort();}}}
 const admin=client();
 assert.equal((await admin.call('/health')).status,200);
 assert.equal((await admin.call('/simulations')).status,401);
 await admin.login('admin');
 const config={seed:42,wallet_count:500,transaction_count:count,simulation_days:7,block_interval_seconds:12,max_transactions_per_block:100,patterns:['STRUCTURING','SMURFING','PEELING','MIXING_PATTERN','RAPID_HIGH_RISK']};
+if(allPatterns)config.patterns.push('CIRCULAR_FLOW','U_TURN_BOUNCE','TAINT_PAGERANK');
 const key=randomUUID();
 const created=await admin.call('/simulations','POST',config,{'Idempotency-Key':key});assert.equal(created.status,202);
 assert.deepEqual((await admin.call('/simulations','POST',config,{'Idempotency-Key':key})).data,created.data);
@@ -21,9 +23,9 @@ console.log(`Smoke run ${runId}: ${count} transactions`);
 async function waitRun(allowRestart=false){let lastPrint=0,didRestart=false;const end=Date.now()+1800000;while(Date.now()<end){const result=await admin.call('/simulations/'+runId);assert.equal(result.status,200);const run=result.data;if(run.status==='failed')throw new Error(run.error);if(run.status==='completed')return run;if(Date.now()-lastPrint>5000){console.log(`Progress: ${run.status}, ledger=${run.transaction_count}, analyzed=${run.analyzed_count}`);lastPrint=Date.now()}if(allowRestart&&!didRestart&&run.transaction_count>0&&run.transaction_count<count){const child=spawnSync('docker',['compose','restart','worker'],{cwd:new URL('..',import.meta.url),encoding:'utf8'});assert.equal(child.status,0,'Docker worker restart failed');didRestart=true;console.log('Worker restarted during ledger ingestion; verifying recovery.')}await new Promise(r=>setTimeout(r,1000))}throw new Error('Run timed out')}
 await waitRun(restart);
 const metrics=(await admin.call('/metrics?run_id='+runId)).data;
-assert.equal(metrics.transaction_count,count);assert.equal(metrics.campaigns_detected,5);
+assert.equal(metrics.transaction_count,count);assert.equal(metrics.campaigns_detected,config.patterns.length);assert.equal(metrics.rule_version,'rules-v2');
 const alerts=(await admin.call('/alerts?run_id='+runId)).data.items;
-for(const code of ['STRUCTURING','SMURFING','PEELING','MIXING_PATTERN','RAPID_HIGH_RISK','DIRECT_BLACKLIST'])assert.ok(alerts.some(a=>a.detector_code===code),`Missing ${code}`);
+for(const code of [...config.patterns,'DIRECT_BLACKLIST'])assert.ok(alerts.some(a=>a.detector_code===code),`Missing ${code}`);
 const first=(await admin.call('/transactions?run_id='+runId+'&limit=10')).data;
 const second=(await admin.call('/transactions?run_id='+runId+'&limit=10&cursor='+encodeURIComponent(first.next_cursor))).data;
 assert.ok(first.items.every(t=>typeof t.value_base==='string'));
@@ -41,5 +43,6 @@ const replay=await admin.call('/simulations/'+runId+'/replay','POST',{mode:'as-k
 await waitRun();
 const after=(await admin.call('/metrics?run_id='+runId)).data;assert.equal(after.ledger_hash,metrics.ledger_hash);assert.equal(after.transaction_count,count);assert.equal((await admin.call('/wallets/'+first.items[0].from_address+'?run_id='+runId)).data.balance_base,balance);
 mkdirSync(new URL('../artifacts/',import.meta.url),{recursive:true});
-writeFileSync(new URL('../artifacts/smoke-report.json',import.meta.url),JSON.stringify({run_id:runId,restart_requested:restart,checks:'API/RBAC/CSRF/idempotency/cursor/timeline/budgets/review/SSE/replay',initial:metrics,replay:after},null,2));
-console.log(JSON.stringify({result:'PASS',run_id:runId,transactions:count,campaigns:`${metrics.campaigns_detected}/${metrics.campaign_count}`,alerts:alerts.length,throughput_tx_s:metrics.throughput_tx_s,report:'artifacts/smoke-report.json'}));
+const report=allPatterns?'artifacts/smoke-all-patterns-report.json':'artifacts/smoke-report.json';
+writeFileSync(new URL('../'+report,import.meta.url),JSON.stringify({run_id:runId,restart_requested:restart,patterns:config.patterns,checks:'API/RBAC/CSRF/idempotency/cursor/timeline/budgets/review/SSE/replay',initial:metrics,replay:after},null,2));
+console.log(JSON.stringify({result:'PASS',run_id:runId,transactions:count,campaigns:`${metrics.campaigns_detected}/${metrics.campaign_count}`,alerts:alerts.length,throughput_tx_s:metrics.throughput_tx_s,report}));

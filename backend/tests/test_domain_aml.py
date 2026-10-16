@@ -94,7 +94,7 @@ def test_T03_inclusive_window_and_expiration():
     assert "STRUCTURING" not in codes(e.process(tx(e, addr(1), addr(2), UNIT, 8, 1801)))
 
 
-@pytest.mark.parametrize("pattern", ["SMURFING", "PEELING", "MIXING_PATTERN", "RAPID_HIGH_RISK", "CIRCULAR_FLOW", "U_TURN_BOUNCE"])
+@pytest.mark.parametrize("pattern", ["SMURFING", "PEELING", "MIXING_PATTERN", "RAPID_HIGH_RISK", "CIRCULAR_FLOW", "U_TURN_BOUNCE", "TAINT_PAGERANK"])
 def test_T04_T05_T07_T11_synthetic_patterns(pattern):
     dataset = generate(SimulationConfig(wallet_count=80, transaction_count=150, patterns=[pattern]))
     engine = Engine(dataset["genesis"], dataset["feed"])
@@ -125,6 +125,10 @@ def test_T04_T05_T07_T11_synthetic_patterns(pattern):
         h = next(h for h in matched[-1][1]["hits"] if h["code"] == pattern)
         assert h["observed"]["bounce_ratio"] >= 0.9
         assert h["observed"]["dwell_seconds"] <= 300
+    if pattern == "TAINT_PAGERANK":
+        h = next(h for h in matched[-1][1]["hits"] if h["code"] == pattern)
+        assert 0.0 <= h["observed"]["exposure_score"] <= 1.0
+        assert h["observed"]["exposure_score"] >= 0.05
 
 
 def test_circular_flow_unit_and_boundaries():
@@ -207,6 +211,48 @@ def test_u_turn_bounce_unit_and_boundaries():
     e5.process(tx(e5, addr(1), addr(2), 1000 * UNIT, 0, 0))
     res5 = e5.process(tx(e5, addr(2), addr(3), 950 * UNIT, 1, 60))
     assert "U_TURN_BOUNCE" not in codes(res5)
+
+
+def test_taint_pagerank_unit_and_boundaries():
+    blacklist_feed = [feed(addr(1))]
+    genesis = {addr(1): 20000 * UNIT, addr(10): 20000 * UNIT}
+
+    # 1. Multi-hop propagation: 1 (blacklist) -> 2 -> 3
+    e = Engine(genesis, blacklist_feed)
+    res_b = e.process(tx(e, addr(1), addr(2), 5000 * UNIT, 0, 0))
+    assert "TAINT_PAGERANK" in codes(res_b)
+    hit_b = next(h for h in res_b["hits"] if h["code"] == "TAINT_PAGERANK")
+    assert hit_b["observed"]["recipient"] == addr(2)
+    assert 0.8 <= hit_b["observed"]["exposure_score"] <= 1.0
+    assert res_b["score"] >= 70
+
+    res_c = e.process(tx(e, addr(2), addr(3), 4000 * UNIT, 1, 60))
+    assert "TAINT_PAGERANK" in codes(res_c)
+    hit_c = next(h for h in res_c["hits"] if h["code"] == "TAINT_PAGERANK")
+    assert hit_c["observed"]["recipient"] == addr(3)
+    assert 0.5 <= hit_c["observed"]["exposure_score"] <= hit_b["observed"]["exposure_score"]
+    assert res_c["score"] >= 70
+
+    # 2. Weighted branching: 1 -> B1 (800 SIM) and 1 -> B2 (200 SIM)
+    e2 = Engine(genesis, blacklist_feed)
+    res_b1 = e2.process(tx(e2, addr(1), addr(4), 800 * UNIT, 0, 0))
+    res_b2 = e2.process(tx(e2, addr(1), addr(5), 200 * UNIT, 1, 12))
+    assert "TAINT_PAGERANK" in codes(res_b1) and "TAINT_PAGERANK" in codes(res_b2)
+    hit_b1 = next(h for h in res_b1["hits"] if h["code"] == "TAINT_PAGERANK")
+    hit_b2 = next(h for h in res_b2["hits"] if h["code"] == "TAINT_PAGERANK")
+    assert hit_b1["observed"]["exposure_score"] > hit_b2["observed"]["exposure_score"]
+
+    # 3. Disconnected flow: 10 -> 11 (clean nodes, no taint reachability from 1)
+    e3 = Engine(genesis, blacklist_feed)
+    res_clean = e3.process(tx(e3, addr(10), addr(11), 1000 * UNIT, 0, 0))
+    assert "TAINT_PAGERANK" not in codes(res_clean)
+
+    # 4. Inactive/Future blacklist feed: no seed in graph
+    future_feed = [feed(addr(1), known_at=(GENESIS + timedelta(days=2)).isoformat())]
+    e4 = Engine(genesis, future_feed)
+    res_future = e4.process(tx(e4, addr(1), addr(2), 1000 * UNIT, 0, 0))
+    assert "TAINT_PAGERANK" not in codes(res_future)
+
 
 
 def test_T06_peeling_needs_four_levels():

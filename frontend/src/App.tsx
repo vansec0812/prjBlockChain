@@ -57,6 +57,7 @@ const patterns = [
   "RAPID_HIGH_RISK",
   "CIRCULAR_FLOW",
   "U_TURN_BOUNCE",
+  "TAINT_PAGERANK",
 ];
 const names: Record<string, string> = {
   STRUCTURING: "Chia nhỏ giao dịch",
@@ -67,6 +68,7 @@ const names: Record<string, string> = {
   DIRECT_BLACKLIST: "Khớp blacklist",
   CIRCULAR_FLOW: "Chu trình vòng lặp",
   U_TURN_BOUNCE: "Đảo dòng tiền U-turn",
+  TAINT_PAGERANK: "Lan truyền vấy bẩn PageRank",
 };
 const short = (value: string) =>
   value.length > 22 ? value.slice(0, 10) + "…" + value.slice(-6) : value;
