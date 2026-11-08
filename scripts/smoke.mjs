@@ -23,7 +23,7 @@ console.log(`Smoke run ${runId}: ${count} transactions`);
 async function waitRun(allowRestart=false){let lastPrint=0,didRestart=false;const end=Date.now()+1800000;while(Date.now()<end){const result=await admin.call('/simulations/'+runId);assert.equal(result.status,200);const run=result.data;if(run.status==='failed')throw new Error(run.error);if(run.status==='completed')return run;if(Date.now()-lastPrint>5000){console.log(`Progress: ${run.status}, ledger=${run.transaction_count}, analyzed=${run.analyzed_count}`);lastPrint=Date.now()}if(allowRestart&&!didRestart&&run.transaction_count>0&&run.transaction_count<count){const child=spawnSync('docker',['compose','restart','worker'],{cwd:new URL('..',import.meta.url),encoding:'utf8'});assert.equal(child.status,0,'Docker worker restart failed');didRestart=true;console.log('Worker restarted during ledger ingestion; verifying recovery.')}await new Promise(r=>setTimeout(r,1000))}throw new Error('Run timed out')}
 await waitRun(restart);
 const metrics=(await admin.call('/metrics?run_id='+runId)).data;
-assert.equal(metrics.transaction_count,count);assert.equal(metrics.campaigns_detected,config.patterns.length);assert.equal(metrics.rule_version,'rules-v2');
+assert.equal(metrics.transaction_count,count);assert.equal(metrics.campaigns_detected,config.patterns.length);assert.equal(metrics.rule_version,'rules-v3');
 const alerts=(await admin.call('/alerts?run_id='+runId)).data.items;
 for(const code of [...config.patterns,'DIRECT_BLACKLIST'])assert.ok(alerts.some(a=>a.detector_code===code),`Missing ${code}`);
 const first=(await admin.call('/transactions?run_id='+runId+'&limit=10')).data;

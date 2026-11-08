@@ -1,0 +1,257 @@
+{
+  "schema_version": 1,
+  "rule_version": "rules-v3",
+  "generator_version": "generator-v2",
+  "scope": "multi-seed repeatability and ledger validation; no held-out split, tuning or quality benchmark",
+  "source_hash": "b02507b7132367616ce7e8675ae079d865dc8e91c737856271c87ac14e72c760",
+  "python": "3.12.15",
+  "platform": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+  "networkx": "3.7",
+  "runs": [
+    {
+      "seed": 42,
+      "config": {
+        "seed": 42,
+        "wallet_count": 500,
+        "transaction_count": 5000,
+        "simulation_days": 7,
+        "block_interval_seconds": 12,
+        "max_transactions_per_block": 100,
+        "patterns": [
+          "STRUCTURING",
+          "SMURFING",
+          "PEELING",
+          "MIXING_PATTERN",
+          "RAPID_HIGH_RISK",
+          "CIRCULAR_FLOW",
+          "U_TURN_BOUNCE",
+          "TAINT_PAGERANK"
+        ]
+      },
+      "ledger_hash": "566ff35e143d1e87b3b42ecab88bb5f16331e09a07af0a844f92f170a2934def",
+      "predictions_hash": "8d0ba352b37b1637034ebf5fb929f71059f813d77ea382b3dec0a09a05b50740",
+      "transaction_count": 5000,
+      "genesis_supply_base": "432164008000000",
+      "final_supply_base": "432164008000000",
+      "fee_sink_base": "105000000",
+      "coverage_counts": {
+        "complete": 3876,
+        "partial": 1124
+      },
+      "rule_hit_counts": {
+        "CIRCULAR_FLOW": 1,
+        "DIRECT_BLACKLIST": 2,
+        "MIXING_PATTERN": 1,
+        "PEELING": 3,
+        "RAPID_HIGH_RISK": 3,
+        "SMURFING": 4,
+        "STRUCTURING": 10,
+        "TAINT_PAGERANK": 9,
+        "U_TURN_BOUNCE": 1
+      },
+      "validation_seconds": 13.799603991000026,
+      "checks": [
+        "generator repeat",
+        "ledger replay",
+        "supply conservation",
+        "analysis repeat"
+      ]
+    },
+    {
+      "seed": 43,
+      "config": {
+        "seed": 43,
+        "wallet_count": 500,
+        "transaction_count": 5000,
+        "simulation_days": 7,
+        "block_interval_seconds": 12,
+        "max_transactions_per_block": 100,
+        "patterns": [
+          "STRUCTURING",
+          "SMURFING",
+          "PEELING",
+          "MIXING_PATTERN",
+          "RAPID_HIGH_RISK",
+          "CIRCULAR_FLOW",
+          "U_TURN_BOUNCE",
+          "TAINT_PAGERANK"
+        ]
+      },
+      "ledger_hash": "3d1fefb75f4da26cb87520d321b15d6fc4d547057711bb72bd40e63dc041a497",
+      "predictions_hash": "ab51cfab632750d17c18ae83cb527716fa8016213968fba2d02bba762a859c39",
+      "transaction_count": 5000,
+      "genesis_supply_base": "432164008000000",
+      "final_supply_base": "432164008000000",
+      "fee_sink_base": "105000000",
+      "coverage_counts": {
+        "complete": 3842,
+        "partial": 1158
+      },
+      "rule_hit_counts": {
+        "CIRCULAR_FLOW": 1,
+        "DIRECT_BLACKLIST": 2,
+        "MIXING_PATTERN": 1,
+        "PEELING": 3,
+        "RAPID_HIGH_RISK": 3,
+        "SMURFING": 4,
+        "STRUCTURING": 10,
+        "TAINT_PAGERANK": 9,
+        "U_TURN_BOUNCE": 1
+      },
+      "validation_seconds": 13.22146370500002,
+      "checks": [
+        "generator repeat",
+        "ledger replay",
+        "supply conservation",
+        "analysis repeat"
+      ]
+    },
+    {
+      "seed": 44,
+      "config": {
+        "seed": 44,
+        "wallet_count": 500,
+        "transaction_count": 5000,
+        "simulation_days": 7,
+        "block_interval_seconds": 12,
+        "max_transactions_per_block": 100,
+        "patterns": [
+          "STRUCTURING",
+          "SMURFING",
+          "PEELING",
+          "MIXING_PATTERN",
+          "RAPID_HIGH_RISK",
+          "CIRCULAR_FLOW",
+          "U_TURN_BOUNCE",
+          "TAINT_PAGERANK"
+        ]
+      },
+      "ledger_hash": "e6dec0eec8bd75573bdcf5355d54c3c65ba112bca2c32f226dc3c5249cf5446b",
+      "predictions_hash": "6f6f2130e612937611119f3e8d87f4522d2ca5f46fc3ef8548caa17d16a2475f",
+      "transaction_count": 5000,
+      "genesis_supply_base": "432164008000000",
+      "final_supply_base": "432164008000000",
+      "fee_sink_base": "105000000",
+      "coverage_counts": {
+        "complete": 3893,
+        "partial": 1107
+      },
+      "rule_hit_counts": {
+        "CIRCULAR_FLOW": 1,
+        "DIRECT_BLACKLIST": 2,
+        "MIXING_PATTERN": 1,
+        "PEELING": 3,
+        "RAPID_HIGH_RISK": 3,
+        "SMURFING": 4,
+        "STRUCTURING": 10,
+        "TAINT_PAGERANK": 9,
+        "U_TURN_BOUNCE": 1
+      },
+      "validation_seconds": 13.765342431000022,
+      "checks": [
+        "generator repeat",
+        "ledger replay",
+        "supply conservation",
+        "analysis repeat"
+      ]
+    },
+    {
+      "seed": 45,
+      "config": {
+        "seed": 45,
+        "wallet_count": 500,
+        "transaction_count": 5000,
+        "simulation_days": 7,
+        "block_interval_seconds": 12,
+        "max_transactions_per_block": 100,
+        "patterns": [
+          "STRUCTURING",
+          "SMURFING",
+          "PEELING",
+          "MIXING_PATTERN",
+          "RAPID_HIGH_RISK",
+          "CIRCULAR_FLOW",
+          "U_TURN_BOUNCE",
+          "TAINT_PAGERANK"
+        ]
+      },
+      "ledger_hash": "a6e633922dc024c4f7db0d414f29ea323ace49bfb05fabfe03ad5dc6f32ba17c",
+      "predictions_hash": "dd09ccf30054660c1860b26f4b4da2406de9070eb48f0b5039e88d17aebc1368",
+      "transaction_count": 5000,
+      "genesis_supply_base": "432164008000000",
+      "final_supply_base": "432164008000000",
+      "fee_sink_base": "105000000",
+      "coverage_counts": {
+        "complete": 3840,
+        "partial": 1160
+      },
+      "rule_hit_counts": {
+        "CIRCULAR_FLOW": 1,
+        "DIRECT_BLACKLIST": 2,
+        "MIXING_PATTERN": 1,
+        "PEELING": 3,
+        "RAPID_HIGH_RISK": 3,
+        "SMURFING": 4,
+        "STRUCTURING": 10,
+        "TAINT_PAGERANK": 9,
+        "U_TURN_BOUNCE": 1
+      },
+      "validation_seconds": 11.908268352999926,
+      "checks": [
+        "generator repeat",
+        "ledger replay",
+        "supply conservation",
+        "analysis repeat"
+      ]
+    },
+    {
+      "seed": 46,
+      "config": {
+        "seed": 46,
+        "wallet_count": 500,
+        "transaction_count": 5000,
+        "simulation_days": 7,
+        "block_interval_seconds": 12,
+        "max_transactions_per_block": 100,
+        "patterns": [
+          "STRUCTURING",
+          "SMURFING",
+          "PEELING",
+          "MIXING_PATTERN",
+          "RAPID_HIGH_RISK",
+          "CIRCULAR_FLOW",
+          "U_TURN_BOUNCE",
+          "TAINT_PAGERANK"
+        ]
+      },
+      "ledger_hash": "bfe21ac6e8b9271a04f887c3cee199bd5bd9c410404b9d869b960f99ad148773",
+      "predictions_hash": "730d8abb3efed351f22392e4cbddc3bc9c12b8329c977405382e1dce25743917",
+      "transaction_count": 5000,
+      "genesis_supply_base": "432164008000000",
+      "final_supply_base": "432164008000000",
+      "fee_sink_base": "105000000",
+      "coverage_counts": {
+        "complete": 3946,
+        "partial": 1054
+      },
+      "rule_hit_counts": {
+        "CIRCULAR_FLOW": 1,
+        "DIRECT_BLACKLIST": 2,
+        "MIXING_PATTERN": 1,
+        "PEELING": 3,
+        "RAPID_HIGH_RISK": 3,
+        "SMURFING": 4,
+        "STRUCTURING": 10,
+        "TAINT_PAGERANK": 9,
+        "U_TURN_BOUNCE": 1
+      },
+      "validation_seconds": 11.879568766000034,
+      "checks": [
+        "generator repeat",
+        "ledger replay",
+        "supply conservation",
+        "analysis repeat"
+      ]
+    }
+  ]
+}
