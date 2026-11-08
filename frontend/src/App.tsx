@@ -166,6 +166,9 @@ export function App() {
   useEffect(() => {
     if (!user) return;
     const controller = new AbortController();
+    setTxs([]);
+    setAlerts([]);
+    setCursor(null);
     let sequence = 0;
     const refresh = async () => {
       const request = ++sequence;
@@ -374,9 +377,6 @@ export function App() {
     setDetail(null);
     setWallet(null);
     setEdge(null);
-    setTxs([]);
-    setAlerts([]);
-    setCursor(null);
     setGraphParams({ center: center || undefined, hops, as_of_index: value });
   };
   const onEdge = useCallback(

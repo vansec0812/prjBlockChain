@@ -48,7 +48,7 @@ run completed có thể replay sang analysis mới. Không migration schema.
 | `npm.cmd test` | 11 passed |
 | `npm.cmd run build` | TypeScript/Vite pass |
 | `npm.cmd audit --audit-level=high` | 0 vulnerabilities tại thời điểm chạy |
-| `npm.cmd run test:e2e` | 6 passed, 19,8 s; gồm cutoff thống nhất và response đảo thứ tự |
+| `npm.cmd run test:e2e` | 6 passed; gồm cutoff thống nhất, giữ/nhả phím sau khi response đã về và response đảo thứ tự |
 | `node scripts/smoke.mjs --count=5000 --all-patterns --restart-worker` | PASS, 8/8 campaigns, đủ 9 detector codes, 19 episodes |
 | `python -m app.validate --transactions=5000 --wallets=500 --output=/reports/multi-seed-final.json` trong image giới hạn 2 CPU/2 GiB, network none | 5 seed 42–46 pass generation/ledger/prediction repeatability |
 

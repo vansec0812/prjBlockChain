@@ -66,6 +66,28 @@ test("timeline applies the same cutoff to graph, alert queue and ledger table", 
     .getByRole("button", { name: "Điều khiển mô phỏng", exact: true })
     .click();
   await expect(page.locator(".transactions tbody tr")).toHaveCount(2);
+  await page
+    .getByRole("button", { name: "Khám phá dòng tiền", exact: true })
+    .click();
+  const firstTransaction = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/transactions?") &&
+      new URL(response.url()).searchParams.get("as_of_index") === "0",
+  );
+  await page.locator("#timeline").focus();
+  await page.keyboard.down("Home");
+  await (await firstTransaction).finished();
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  await page.keyboard.up("Home");
+  await page
+    .getByRole("button", { name: "Điều khiển mô phỏng", exact: true })
+    .click();
+  await expect(page.locator(".transactions tbody tr")).toHaveCount(1);
 });
 
 test("an earlier refresh cannot overwrite a later response", async ({
