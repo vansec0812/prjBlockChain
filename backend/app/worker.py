@@ -366,6 +366,9 @@ def analyze(job_id: str):
                             "latest_assessment": result,
                             "evidence": list(dict.fromkeys(alert.payload["evidence"] + hit["evidence"])),
                             "observed": hit["observed"],
+                            "coverage": "partial"
+                            if "partial" in (alert.payload["coverage"], result["coverage"])
+                            else "complete",
                         }
                     db.flush()
                     snapshot = {
@@ -387,7 +390,7 @@ def analyze(job_id: str):
                             }
                         ],
                         ["run_id", "alert_id", "as_of_order"],
-                        [],
+                        ["payload"],
                     )
                     upsert(
                         db,
@@ -417,7 +420,7 @@ def analyze(job_id: str):
                                 Assessment.tx_hash == h,
                                 Assessment.analysis_version == version,
                             )
-                            .order_by(Assessment.as_of_order)
+                            .order_by(Assessment.as_of_order.desc())
                             .limit(1)
                         )
                         if old is None:
@@ -442,6 +445,15 @@ def analyze(job_id: str):
                             "retrospective_reason": "motif_completed",
                             "as_of_order": list(tx.order),
                             "detected_at": tx.timestamp.isoformat(),
+                            "coverage": "partial"
+                            if "partial" in (old.payload["coverage"], result["coverage"])
+                            else "complete",
+                            "partial_reasons": sorted(
+                                set(old.payload.get("partial_reasons", []))
+                                | set(result.get("partial_reasons", []))
+                            ),
+                            "truncated": old.payload.get("truncated", False)
+                            or result.get("truncated", False),
                         }
                         upsert(
                             db,
@@ -493,17 +505,20 @@ def analyze(job_id: str):
     elapsed = time.perf_counter() - start
     EvalSession = evaluator_session()
     with EvalSession() as ev:
-        truth = {
-            c.pattern: c.tx_hashes for c in ev.scalars(select(Campaign).where(Campaign.run_id == run_id))
-        }
+        campaigns = [
+            {"id": c.id, "pattern": c.pattern, "tx_hashes": c.tx_hashes}
+            for c in ev.scalars(select(Campaign).where(Campaign.run_id == run_id))
+        ]
     with Session.begin() as db:
         alerts = [
-            a.payload
+            {**a.payload, "id": a.id}
             for a in db.scalars(
                 select(Alert).where(Alert.run_id == run_id, Alert.analysis_version == version)
             )
         ]
-        metrics = evaluate(truth, online, alerts)
+        metrics = evaluate({}, online, alerts, campaigns=campaigns)
+        # Public metrics expose aggregates, never evaluator-only campaign identities.
+        metrics.pop("campaigns")
         mode = config.get("mode", "as-known")
         metrics["analysis_mode"] = mode
         if mode == "retrospective":

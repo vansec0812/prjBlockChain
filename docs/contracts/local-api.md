@@ -60,3 +60,13 @@ also refuses those jobs before modifying ledger or assessments. Completed legacy
 runs can replay into a new rules-v2 analysis without changing ledger balances.
 Historical assessments retain their original version. No schema migration is
 required. See [ADR-0002](../decisions/0002-reviewed-motifs-rules-v2.md).
+
+Rules-v3 preserves scoring thresholds and immutable legacy results while fixing
+cumulative retrospective reasons/coverage. Alert graphs resolve evidence from
+the snapshot valid at the requested cutoff, including earlier transactions only
+identified as evidence later. Job retry refuses missing or rules-v1/v2 versions;
+completed legacy runs may replay into a fresh rules-v3 analysis. Health includes
+`rule_version` and `generator_version`; run DTO includes stored generator version.
+New runs record generator-v2 metadata; intent generation itself is unchanged.
+Metrics add per-pattern campaign counts and a matching policy; evaluator-only
+campaign identities are excluded. See [ADR-0003](../decisions/0003-atomic-validation-and-history.md).

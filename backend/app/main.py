@@ -17,7 +17,15 @@ from sqlalchemy import and_, func, or_, select, text
 from starlette.middleware.sessions import SessionMiddleware
 from app.aml import Engine
 from app.db import Session, get_db
-from app.domain import RULE_VERSION, SimulationConfig, Tx, canonical_hash, freeze_feed, synthetic_feed
+from app.domain import (
+    GENERATOR_VERSION,
+    RULE_VERSION,
+    SimulationConfig,
+    Tx,
+    canonical_hash,
+    freeze_feed,
+    synthetic_feed,
+)
 from app.models import (
     Alert,
     AlertSnapshot,
@@ -171,6 +179,7 @@ def run_dto(run):
         "network_id": run.network_id,
         "asset_id": "SIM",
         "asset_decimals": 6,
+        "generator_version": run.generator_version,
     }
 
 
@@ -236,7 +245,13 @@ class FeedInput(BaseModel):
 @app.get("/api/health")
 def health(db=Depends(get_db)):
     db.execute(text("SELECT 1"))
-    return {"status": "ok", "baseline": "B2", "schema_version": 1}
+    return {
+        "status": "ok",
+        "baseline": "B2",
+        "schema_version": 1,
+        "rule_version": RULE_VERSION,
+        "generator_version": GENERATOR_VERSION,
+    }
 
 
 @app.get("/api/session")
@@ -322,7 +337,16 @@ def create_simulation(
     version = (
         f"b2-{RULE_VERSION}:" + canonical_hash([config, snapshot, "as-known", "baseline-A0"])[:12] + ":a1"
     )
-    db.add(Run(id=run_id, seed=body.seed, config=config, active_version=version, feed_snapshot=snapshot))
+    db.add(
+        Run(
+            id=run_id,
+            seed=body.seed,
+            config=config,
+            active_version=version,
+            feed_snapshot=snapshot,
+            generator_version=GENERATOR_VERSION,
+        )
+    )
     db.flush()
     job = Job(
         run_id=run_id,
@@ -443,6 +467,22 @@ def assessment_query(run_id, version, cutoff):
     return latest
 
 
+def historical_alert_payload(db, alert, cutoff):
+    snapshot = db.scalar(
+        select(AlertSnapshot)
+        .where(
+            AlertSnapshot.run_id == alert.run_id,
+            AlertSnapshot.alert_id == alert.id,
+            AlertSnapshot.as_of_order <= cutoff,
+        )
+        .order_by(AlertSnapshot.as_of_order.desc())
+        .limit(1)
+    )
+    if snapshot is None:
+        raise HTTPException(404, "Alert not available at this cutoff")
+    return snapshot.payload
+
+
 @app.get("/api/transactions")
 def transactions(
     run_id: str,
@@ -559,19 +599,7 @@ def alert_detail(
         raise HTTPException(404, "Không tìm thấy cảnh báo trong run.")
     result = alert_dto(alert)
     if as_of_index is not None:
-        snapshot = db.scalar(
-            select(AlertSnapshot)
-            .where(
-                AlertSnapshot.run_id == run_id,
-                AlertSnapshot.alert_id == alert_id,
-                AlertSnapshot.as_of_order <= as_of_index,
-            )
-            .order_by(AlertSnapshot.as_of_order.desc())
-            .limit(1)
-        )
-        if snapshot is None:
-            raise HTTPException(404, "Alert not available at this cutoff")
-        result.update(snapshot.payload)
+        result.update(historical_alert_payload(db, alert, as_of_index))
     result["transactions"] = [
         t.payload
         for t in db.scalars(
@@ -728,9 +756,10 @@ def graph(
         if alert is None or alert.detected_order > cutoff:
             raise HTTPException(404, "Alert is not available at this cutoff")
         version = alert.analysis_version
+        evidence = historical_alert_payload(db, alert, cutoff)["evidence"]
         rows = list(
             db.scalars(
-                base.where(Transaction.tx_hash.in_(alert.payload["evidence"]))
+                base.where(Transaction.tx_hash.in_(evidence))
                 .order_by(Transaction.global_index)
                 .limit(max_edges + 1)
             )

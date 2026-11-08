@@ -189,3 +189,7 @@ Circular Flow, U-Turn và PageRank là mở rộng tập motif theo
 Giữ công thức E/blend và các floor đã khóa. PageRank chỉ cung cấp ngữ cảnh;
 evidence lượng tiền phải từ haircut theo thời gian, có budget và coverage.
 Không diễn giải các detector bổ sung là đã có trong kế hoạch gốc.
+
+Rules-v3 giữ thresholds trên và củng cố rejection/history/coverage theo
+[ADR-0003](../../docs/decisions/0003-atomic-validation-and-history.md). Không
+resume checkpoint rules-v1/v2 bằng engine mới hoặc đổi nhãn kết quả lịch sử.

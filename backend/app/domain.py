@@ -12,7 +12,8 @@ UNIT = 1_000_000
 THRESHOLD = 1_000 * UNIT
 FEE = 21_000
 GENESIS = datetime(2026, 9, 8, tzinfo=timezone.utc)
-RULE_VERSION = "rules-v2"
+RULE_VERSION = "rules-v3"
+GENERATOR_VERSION = "generator-v2"
 PATTERNS = [
     "STRUCTURING",
     "SMURFING",
@@ -64,7 +65,7 @@ def money(value: str) -> int:
 
 
 def address_valid(address: str) -> bool:
-    return bool(re.fullmatch(r"sim_[0-9a-f]{16}", address))
+    return isinstance(address, str) and bool(re.fullmatch(r"sim_[0-9a-f]{16}", address))
 
 
 class SimulationConfig(BaseModel):
@@ -101,6 +102,26 @@ class Tx:
     def order(self):
         return self.height, self.index
 
+    def validate(self):
+        if any(
+            type(value) is not int or value < 0
+            for value in (self.height, self.index, self.global_index, self.nonce)
+        ):
+            raise ValueError("Order and nonce must be nonnegative integers")
+        if not address_valid(self.sender) or not address_valid(self.recipient):
+            raise ValueError("Invalid transaction address")
+        if not isinstance(self.tx_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", self.tx_hash):
+            raise ValueError("Invalid transaction hash")
+        if self.block_hash and not re.fullmatch(r"[0-9a-f]{64}", self.block_hash):
+            raise ValueError("Invalid block hash")
+        if not isinstance(self.timestamp, datetime) or self.timestamp.utcoffset() is None:
+            raise ValueError("Transaction timestamp requires timezone")
+        if type(self.value) is not int or not 0 < self.value < 10**78:
+            raise ValueError("Invalid transaction value")
+        if type(self.fee) is not int or self.fee != FEE:
+            raise ValueError("Invalid simulator fee")
+        return self
+
     def payload(self) -> dict:
         return {
             "schema_version": 1,
@@ -117,7 +138,7 @@ class Tx:
             "value_base": str(self.value),
             "fee_base": str(self.fee),
             "nonce": self.nonce,
-            "timestamp": self.timestamp.isoformat(),
+            "timestamp": self.timestamp.astimezone(timezone.utc).isoformat(),
             "gas_limit": 21000,
             "gas_used": 21000,
             "effective_gas_price_base": "1",
@@ -127,7 +148,8 @@ class Tx:
     @classmethod
     def from_payload(cls, data: dict):
         if (
-            data.get("schema_version") != 1
+            type(data.get("schema_version")) is not int
+            or data.get("schema_version") != 1
             or data.get("network_id") != "sim-account-1"
             or data.get("asset_id") != "SIM"
             or data.get("hash_scheme") != "sim-sha256-v1"
@@ -153,7 +175,7 @@ class Tx:
             data["tx_index"],
             data["global_index"],
             data.get("block_hash", ""),
-        )
+        ).validate()
 
 
 @dataclass
@@ -168,7 +190,8 @@ class Ledger:
             raise ValueError("Invalid genesis balance")
         self.supply = sum(self.balances.values())
 
-    def apply(self, sender: str, recipient: str, value: int, nonce: int, fee: int = FEE):
+    def validate(self, sender: str, recipient: str, value: int, nonce: int, fee: int = FEE):
+        """Compute all balance effects before mutation, including self-transfer and fees."""
         if not address_valid(sender) or not address_valid(recipient):
             raise ValueError("Invalid address")
         if type(value) is not int or value <= 0 or value >= 10**78:
@@ -179,9 +202,15 @@ class Ledger:
             raise ValueError("Invalid fee")
         if self.balances.get(sender, 0) < value + fee:
             raise ValueError("Insufficient balance")
-        self.balances[sender] -= value + fee
-        self.balances[recipient] = self.balances.get(recipient, 0) + value
-        self.balances["fee_sink"] += fee
+        changes = {sender: self.balances[sender] - value - fee}
+        changes[recipient] = changes.get(recipient, self.balances.get(recipient, 0)) + value
+        changes["fee_sink"] = self.balances["fee_sink"] + fee
+        if any(not 0 <= balance < 10**78 for balance in changes.values()):
+            raise ValueError("Balance exceeds NUMERIC(78,0) capacity")
+        return changes
+
+    def apply(self, sender: str, recipient: str, value: int, nonce: int, fee: int = FEE):
+        self.balances.update(self.validate(sender, recipient, value, nonce, fee))
         self.nonces[sender] = nonce + 1
         if sum(self.balances.values()) != self.supply or min(self.balances.values()) < 0:
             raise AssertionError("Ledger conservation violated")
