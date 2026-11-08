@@ -148,6 +148,11 @@ export function App() {
   const createKey = useRef(crypto.randomUUID());
   const refreshRef = useRef<() => void>(() => {});
   const runStatusRef = useRef<string | undefined>(undefined);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const cutoffRef = useRef(cutoff);
+  cutoffRef.current = cutoff;
+  const walletRequest = useRef<AbortController | null>(null);
   runStatusRef.current = run?.status;
   useEffect(() => {
     api<{ user: User | null }>("/session")
@@ -161,7 +166,12 @@ export function App() {
   useEffect(() => {
     if (!user) return;
     const controller = new AbortController();
+    setTxs([]);
+    setAlerts([]);
+    setCursor(null);
+    let sequence = 0;
     const refresh = async () => {
+      const request = ++sequence;
       try {
         const list = await api<Run[]>(
           "/simulations",
@@ -169,6 +179,7 @@ export function App() {
           undefined,
           controller.signal,
         );
+        if (controller.signal.aborted || request !== sequence) return;
         setRuns(list);
         if (!selected) {
           if (list.length) setSelected(list[0].id);
@@ -189,25 +200,36 @@ export function App() {
           ),
           api<{ items: Alert[] }>(
             "/alerts?" +
-              query({ run_id: selected, status: statusFilter || undefined }),
+              query({
+                run_id: selected,
+                status: statusFilter || undefined,
+                as_of_index: cutoff ?? undefined,
+              }),
             "GET",
             undefined,
             controller.signal,
           ),
           api<{ items: Tx[]; next_cursor: string | null }>(
-            "/transactions?" + query({ run_id: selected, limit: 20 }),
+            "/transactions?" +
+              query({
+                run_id: selected,
+                limit: 20,
+                as_of_index: cutoff ?? undefined,
+              }),
             "GET",
             undefined,
             controller.signal,
           ),
         ]);
+        if (controller.signal.aborted || request !== sequence) return;
         setRun(r);
         setMetrics(m);
         setAlerts(a.items);
         setTxs(t.items);
         setCursor(t.next_cursor);
       } catch (e) {
-        if (!controller.signal.aborted) setError((e as Error).message);
+        if (!controller.signal.aborted && request === sequence)
+          setError((e as Error).message);
       }
     };
     refreshRef.current = () => void refresh();
@@ -219,7 +241,7 @@ export function App() {
       controller.abort();
       clearInterval(poll);
     };
-  }, [user, selected, statusFilter]);
+  }, [user, selected, statusFilter, cutoff]);
   useEffect(() => {
     if (!user) return;
     const stream = new EventSource("/api/events");
@@ -262,7 +284,9 @@ export function App() {
       undefined,
       controller.signal,
     )
-      .then(setGraph)
+      .then((value) => {
+        if (!controller.signal.aborted) setGraph(value);
+      })
       .catch((e) => {
         if (!controller.signal.aborted) setError(e.message);
       })
@@ -271,6 +295,12 @@ export function App() {
       });
     return () => controller.abort();
   }, [selected, user, graphParams, graphTick, run?.status === "completed"]);
+  useEffect(() => {
+    walletRequest.current?.abort();
+    setWallet(null);
+    setEdge(null);
+    return () => walletRequest.current?.abort();
+  }, [selected, graphParams]);
   const act = async (operation: () => Promise<void>) => {
     setError("");
     setBusy(true);
@@ -294,10 +324,12 @@ export function App() {
   };
   const openAlert = async (alert: Alert) => {
     if (!selected) return;
+    const scope = selected;
     await act(async () => {
       const value = await api<Alert>(
-        `/alerts/${alert.id}?${query({ run_id: selected })}`,
+        `/alerts/${alert.id}?${query({ run_id: scope, as_of_index: cutoff ?? undefined })}`,
       );
+      if (selectedRef.current !== scope || cutoffRef.current !== cutoff) return;
       setDetail(value);
       setWallet(null);
       setEdge(null);
@@ -307,6 +339,7 @@ export function App() {
       setGraphParams({
         alert_id: value.id,
         as_of_index:
+          cutoff ??
           value.last_detected_order ??
           Math.max(value.detected_order, (run?.transaction_count ?? 1) - 1),
         analysis_version: value.analysis_version,
@@ -316,20 +349,36 @@ export function App() {
   const onNode = useCallback(
     (address: string) => {
       if (!selected) return;
+      walletRequest.current?.abort();
+      const controller = new AbortController();
+      walletRequest.current = controller;
       api<typeof wallet>(
         "/wallets/" +
           address +
           "?" +
           query({ run_id: selected, as_of_index: graph?.as_of_index }),
+        "GET",
+        undefined,
+        controller.signal,
       )
         .then((value) => {
+          if (controller.signal.aborted) return;
           setWallet(value);
           setEdge(null);
         })
-        .catch((e) => setError(e.message));
+        .catch((e) => {
+          if (!controller.signal.aborted) setError(e.message);
+        });
     },
     [selected, graph?.as_of_index],
   );
+  const applyTimeline = (value: number) => {
+    setCutoff(value);
+    setDetail(null);
+    setWallet(null);
+    setEdge(null);
+    setGraphParams({ center: center || undefined, hops, as_of_index: value });
+  };
   const onEdge = useCallback(
     (id: string) => {
       const value =
@@ -856,8 +905,18 @@ export function App() {
                       next_cursor: string | null;
                     }>(
                       "/transactions?" +
-                        query({ run_id: selected, limit: 20, cursor }),
+                        query({
+                          run_id: selected,
+                          limit: 20,
+                          cursor,
+                          as_of_index: cutoff ?? undefined,
+                        }),
                     );
+                    if (
+                      selectedRef.current !== selected ||
+                      cutoffRef.current !== cutoff
+                    )
+                      return;
                     setTxs((t) => [...t, ...result.items]);
                     setCursor(result.next_cursor);
                   })
@@ -986,22 +1045,12 @@ export function App() {
                       cutoff ?? Math.max(0, (run?.transaction_count ?? 1) - 1)
                     }
                     onChange={(e) => setCutoff(Number(e.target.value))}
-                    onPointerUp={() => {
-                      setDetail(null);
-                      setGraphParams({
-                        center: center || undefined,
-                        hops,
-                        as_of_index: cutoff ?? undefined,
-                      });
-                    }}
-                    onKeyUp={() => {
-                      setDetail(null);
-                      setGraphParams({
-                        center: center || undefined,
-                        hops,
-                        as_of_index: cutoff ?? undefined,
-                      });
-                    }}
+                    onPointerUp={(e) =>
+                      applyTimeline(Number(e.currentTarget.value))
+                    }
+                    onKeyUp={(e) =>
+                      applyTimeline(Number(e.currentTarget.value))
+                    }
                     disabled={!run?.transaction_count}
                   />
                   <span>#{graph?.as_of_index ?? "—"}</span>
@@ -1305,7 +1354,8 @@ export function App() {
                   </table>
                 </div>
                 <div className="evaluation-note">
-                  Số liệu của một lần mô phỏng; chưa đại diện chất lượng trên
+                  Metrics của toàn bộ analysis, không phải lát cắt timeline. Số
+                  liệu của một lần mô phỏng; chưa đại diện chất lượng trên
                   unseen runs. Mục tiêu benchmark trong kế hoạch được báo riêng
                   với số đo.
                 </div>

@@ -151,10 +151,12 @@ class Engine:
         self.parts[address] = list(grouped.values())
 
     def process(self, tx: Tx) -> dict:
+        tx.validate()
         if tx.order <= self.last_order:
             raise ValueError("Transactions must arrive in strict ledger order")
         if self.last_timestamp is not None and tx.timestamp < self.last_timestamp:
             raise ValueError("Ledger event timestamps must not decrease")
+        self.ledger.validate(tx.sender, tx.recipient, tx.value, tx.nonce, tx.fee)
         self.last_order = tx.order
         self.last_timestamp = tx.timestamp
         before = self.ledger.balances.get(tx.sender, 0)

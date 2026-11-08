@@ -91,3 +91,13 @@ yêu cầu T01–T22. Counterexamples độc lập tại
 `backend/tests/test_pr_regressions.py`; snapshot TI và tương thích phiên bản
 được kiểm qua PostgreSQL/API/worker trong `test_postgres_api_worker.py`.
 Kết quả thực và giới hạn nằm ở [báo cáo review](../docs/reports/pr-review-2026-10-17.md).
+
+## Củng cố baseline ngày 08/11/2026
+
+R03/T16/T18: `test_review_invariants.py` bảo vệ rejection nguyên tử/capacity/metadata.
+R04/R09–R11/T13/T20/W06: integration episode snapshots/reasons/coverage và E2E
+`history.spec.ts` bảo vệ cutoff đồng nhất. R13: `test_evaluation.py` và integration
+multi-campaign bảo vệ matching/mẫu số; `app.validate` kiểm tái lập nhiều seed.
+[ADR-0003](../docs/decisions/0003-atomic-validation-and-history.md) và
+[báo cáo](../docs/reports/project-review-2026-11-08.md) ghi rõ phần thực hiện và phần
+nghiên cứu chưa hoàn tất; không đánh dấu toàn bộ R05/R13 hoàn thành.

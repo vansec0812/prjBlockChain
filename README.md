@@ -52,7 +52,8 @@ không sử dụng hoặc thay đổi MySQL có sẵn trên máy.
 
 Các rule: STRUCTURING, SMURFING, PEELING, MIXING_PATTERN, RAPID_HIGH_RISK,
 DIRECT_BLACKLIST, CIRCULAR_FLOW, U_TURN_BOUNCE, TAINT_PAGERANK. Phiên bản mới
-`rules-v2` theo [ADR-0002](docs/decisions/0002-reviewed-motifs-rules-v2.md).
+`rules-v3` theo [ADR-0003](docs/decisions/0003-atomic-validation-and-history.md);
+ngưỡng motif vẫn theo [ADR-0002](docs/decisions/0002-reviewed-motifs-rules-v2.md).
 Score floors 70/80/95; làm tròn half-up, baseline A=0.
 Score thể hiện **ưu tiên xem xét**, không phải xác suất hoặc kết luận pháp lý.
 
@@ -64,6 +65,7 @@ docker compose logs --tail 100 api worker
 docker compose --profile test run --rm test
 node scripts/smoke.mjs --count=5000 --restart-worker
 node scripts/smoke.mjs --count=5000 --all-patterns --restart-worker
+docker compose --profile test run --rm test python -m app.validate --transactions=150 --wallets=80
 ```
 
 Test integration chỉ reset database **`aml_test`**; không reset `aml`.
@@ -71,6 +73,12 @@ Smoke tạo run tổng hợp trong `aml`, kiểm RBAC/CSRF/idempotency/cursor/ti
 budget/review/SSE/replay và có thể restart worker giữa ingestion. Báo cáo local
 ở `artifacts/smoke-report.json` (ignored). Để đo workload lớn hơn:
 `node scripts/smoke.mjs --count=100000`; không coi tùy chọn này là benchmark đã đạt.
+
+`app.validate` mặc định kiểm 5 seed (42–46), 5.000 tx/seed; có thể đặt
+`--seeds=10,20,30 --transactions=5000 --wallets=500`. Kiểm generation/prediction
+tái lập và ledger replay/bảo toàn supply, không cần kết nối DB hoặc đọc nhãn.
+Report JSON chứa versions, config và hash; đây là kiểm tra tái lập, không phải
+đánh giá trên split nghiên cứu. [Review và số đo ngày 08/11/2026](docs/reports/project-review-2026-11-08.md).
 
 Frontend development/QA:
 
@@ -137,6 +145,10 @@ Candidate mixing là heuristic vùng trung gian, không xác nhận một dịch
 PageRank là ngữ cảnh topology; evidence lượng tiền dựa trên haircut theo thời
 gian, không dùng rank thay component E. Job cũ khác rule version không retry
 bằng engine mới; giữ dữ liệu cũ và replay run completed sang version mới.
+Ledger validation từ chối overflow balance trước mutation. Graph evidence,
+alert queue và transaction table tôn trọng cutoff; metrics là toàn analysis.
+Evaluator hỗ trợ matching một-một nhiều campaign cùng pattern; generator hiện
+vẫn một campaign mỗi pattern, chưa có các variant độc lập cho split nghiên cứu.
 Payroll/custody giống hình thái có thể cảnh báo; không dùng truth để bỏ qua.
 
 Metrics demo là **single-run synthetic evaluation**, tách online/retrospective.

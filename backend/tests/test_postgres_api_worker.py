@@ -7,7 +7,7 @@ from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from pwdlib import PasswordHash
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import sessionmaker
 from app import worker
@@ -15,7 +15,20 @@ from app.aml import Engine
 from app.db import get_db, make_engine
 from app.domain import RULE_VERSION, SimulationConfig
 from app.main import app
-from app.models import Assessment, Base, Checkpoint, Job, Outbox, Run, Transaction, User, Wallet
+from app.models import (
+    Alert,
+    Assessment,
+    Base,
+    Campaign,
+    Checkpoint,
+    Job,
+    Metric,
+    Outbox,
+    Run,
+    Transaction,
+    User,
+    Wallet,
+)
 
 
 @pytest.fixture
@@ -260,7 +273,7 @@ def test_pagerank_only_run_freezes_seed_before_worker_starts(database):
         assert "TAINT_PAGERANK" in {a["detector_code"] for a in alerts}
 
 
-@pytest.mark.parametrize("legacy_version", [None, "rules-v1"])
+@pytest.mark.parametrize("legacy_version", [None, "rules-v1", "rules-v2"])
 @pytest.mark.parametrize("kind", ["generate", "replay"])
 def test_legacy_job_cannot_resume_with_changed_rules(database, legacy_version, kind):
     factory, _ = database
@@ -305,3 +318,103 @@ def test_episode_quiet_time_crosses_clock_bucket():
     assert worker.same_episode(
         mixing, {"code": "MIXING_PATTERN", "observed": {"region": ["a", "b", "c"]}}, transaction
     )
+
+
+@pytest.mark.parametrize("check", ["reasons", "coverage", "graph"])
+def test_temporal_episode_snapshot_and_cumulative_reasons(database, monkeypatch, check):
+    factory, _ = database
+    history = []
+
+    class EpisodeEngine(Engine):
+        def process(self, tx):
+            result = super().process(tx)
+            history.append(tx)
+            if tx.global_index in (2, 3):
+                evidence = history[1:3] if tx.global_index == 2 else [history[0], history[3]]
+                result["hits"] = [self.hit("STRUCTURING", "anchor", evidence, {}, {})]
+                result["score"], result["severity"] = 70, "High"
+                if tx.global_index == 3:
+                    result.update(coverage="partial", partial_reasons=["graph_budget"], truncated=True)
+                    result["hits"].append(self.hit("SMURFING", "another-anchor", evidence, {}, {}))
+            return result
+
+    monkeypatch.setattr(worker, "Engine", EpisodeEngine)
+    with TestClient(app) as client:
+        ids = client.post(
+            "/api/simulations",
+            json=SimulationConfig(
+                wallet_count=80, transaction_count=150, simulation_days=1, patterns=[]
+            ).model_dump(),
+            headers=login(client),
+        ).json()
+        worker.handle(ids["job_id"])
+        with factory() as db:
+            alert = db.scalar(
+                select(Alert).where(Alert.run_id == ids["run_id"], Alert.detector_code == "STRUCTURING")
+            )
+            alert_id = alert.id
+            current = db.scalar(
+                select(Assessment).where(
+                    Assessment.run_id == ids["run_id"],
+                    Assessment.tx_hash == history[0].tx_hash,
+                    Assessment.as_of_order == 3,
+                )
+            )
+            if check == "reasons":
+                assert {h["code"] for h in current.payload["hits"]} == {"STRUCTURING", "SMURFING"}
+            if check == "coverage":
+                assert current.payload["coverage"] == "partial"
+                assert alert.payload["coverage"] == "partial"
+        graph = client.get(
+            "/api/graph", params={"run_id": ids["run_id"], "alert_id": alert_id, "as_of_index": 2}
+        )
+        assert graph.status_code == 200, graph.text
+        if check == "graph":
+            assert {e["tx_hash"] for e in graph.json()["edges"]} == {history[1].tx_hash, history[2].tx_hash}
+        assert (
+            client.get(
+                "/api/graph", params={"run_id": ids["run_id"], "alert_id": alert_id, "as_of_index": 1}
+            ).status_code
+            == 404
+        )
+
+
+def test_worker_evaluates_multiple_campaigns_without_exposing_identities(database):
+    factory, _ = database
+    with TestClient(app) as client:
+        ids = client.post(
+            "/api/simulations",
+            json=SimulationConfig(
+                wallet_count=80, transaction_count=150, patterns=["STRUCTURING"]
+            ).model_dump(),
+            headers=login(client),
+        ).json()
+        worker.generate_ledger(ids["job_id"])
+        with factory.begin() as db:
+            original = db.scalar(select(Campaign).where(Campaign.run_id == ids["run_id"]))
+            hashes = original.tx_hashes
+            db.execute(delete(Campaign).where(Campaign.run_id == ids["run_id"]))
+            db.add_all(
+                [
+                    Campaign(
+                        run_id=ids["run_id"],
+                        id="private-campaign-a",
+                        pattern="STRUCTURING",
+                        tx_hashes=hashes[:6],
+                    ),
+                    Campaign(
+                        run_id=ids["run_id"],
+                        id="private-campaign-b",
+                        pattern="STRUCTURING",
+                        tx_hashes=hashes[6:],
+                    ),
+                ]
+            )
+        worker.analyze(ids["job_id"])
+        with factory() as db:
+            result = db.get(Metric, (ids["run_id"], ids["analysis_version"])).payload
+            assert result["campaign_count"] == 2
+            assert result["campaigns_detected"] == 1
+            assert result["patterns"]["STRUCTURING"]["campaign_count"] == 2
+            assert "private-campaign" not in str(result)
+            assert "campaigns" not in result
